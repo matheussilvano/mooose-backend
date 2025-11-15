@@ -1,8 +1,9 @@
 # app_routes.py
 import json
-import os # NOVO
-import boto3 # NOVO
-from botocore.exceptions import NoCredentialsError # NOVO
+import os
+import cloudinary  # NOVO
+import cloudinary.uploader  # NOVO
+import cloudinary.api  # NOVO
 from datetime import datetime
 from io import BytesIO
 from pathlib import Path
@@ -32,42 +33,29 @@ from schemas import EnemTextRequest
 
 router = APIRouter(prefix="/app", tags=["app"])
 
-# NOVO: Configuração S3 (lê do ambiente)
-S3_BUCKET = os.environ.get("S3_BUCKET_NAME")
-AWS_ACCESS_KEY_ID = os.environ.get("AWS_ACCESS_KEY_ID")
-AWS_SECRET_ACCESS_KEY = os.environ.get("AWS_SECRET_ACCESS_KEY")
-AWS_REGION = os.environ.get("AWS_REGION")
+# --- Configuração S3 REMOVIDA ---
 
-s3_client = boto3.client(
-    "s3",
-    aws_access_key_id=AWS_ACCESS_KEY_ID,
-    aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
-    region_name=AWS_REGION
-)
+# +++ NOVA CONFIGURAÇÃO CLOUDINARY +++
+# Lê as variáveis de ambiente que você configurou no Render
+try:
+    cloudinary.config(
+        cloud_name=os.environ.get("CLOUD_NAME"),
+        api_key=os.environ.get("API_KEY"),
+        api_secret=os.environ.get("API_SECRET"),
+        secure=True,  # Sempre usar HTTPS
+    )
+except Exception as e:
+    print(f"Alerta: Cloudinary não configurado. Uploads de arquivo falharão. Erro: {e}")
 
 
 class SimulateCheckout(BaseModel):
     plano: str  # "solo" | "intensivo" | "unlimited"
 
 
-# Planos com SUPER promoção de lançamento
 PLANOS_LANCAMENTO = {
-    "solo": {
-        "name": "Plano Enem Solo",
-        "credits": 4,
-        "price": 9.90,
-    },
-    "intensivo": {
-        "name": "Plano Intensivo",
-        "credits": 10,
-        "price": 19.90,
-    },
-    "unlimited": {
-        "name": "Plano Unlimited",
-        # no MVP, damos um número bem alto de créditos para simular "ilimitado"
-        "credits": 9999,
-        "price": 29.90,
-    },
+    "solo": {"name": "Plano Enem Solo", "credits": 4, "price": 9.90},
+    "intensivo": {"name": "Plano Intensivo", "credits": 10, "price": 19.90},
+    "unlimited": {"name": "Plano Unlimited", "credits": 9999, "price": 29.90},
 }
 
 
@@ -78,34 +66,22 @@ def simular_checkout(
     current_user: User = Depends(get_current_user),
 ):
     plano_id = payload.plano
-
     if plano_id not in PLANOS_LANCAMENTO:
         raise HTTPException(status_code=400, detail="Plano inválido.")
-
     plano = PLANOS_LANCAMENTO[plano_id]
-
-    # garante campo de créditos
     user_db = db.get(User, current_user.id)
     if not user_db:
         raise HTTPException(status_code=404, detail="Usuário não encontrado.")
-
     if user_db.credits is None:
         user_db.credits = 0
-
-    # adiciona créditos da promoção de lançamento
     user_db.credits += plano["credits"]
-
     db.add(user_db)
     db.commit()
     db.refresh(user_db)
-
     message = (
-        "SUPER promoção de lançamento 🎉 "
-        f"{plano['name']} por R$ {plano['price']:.2f}/mês "
-        "para os primeiros alunos. "
-        f"Você recebeu +{plano['credits']} créditos."
+        f"SUPER promoção de lançamento 🎉 {plano['name']} por R$ {plano['price']:.2f}/mês "
+        f"para os primeiros alunos. Você recebeu +{plano['credits']} créditos."
     )
-
     return {
         "message": message,
         "credits": user_db.credits,
@@ -121,10 +97,6 @@ def simular_checkout(
 
 
 def _require_credits(user: User):
-    """
-    Apenas valida o objeto que veio do auth.
-    (a checagem real de débito é feita em _debitar_credito, já na sessão atual)
-    """
     if user.credits is None or user.credits <= 0:
         raise HTTPException(
             status_code=402,
@@ -133,42 +105,28 @@ def _require_credits(user: User):
 
 
 def _debitar_credito(db: Session, user: User) -> User:
-    """
-    Debita 1 crédito usando SEMPRE o usuário na sessão atual (db),
-    evitando conflito de sessões do SQLAlchemy.
-    """
     user_db = db.get(User, user.id)
     if not user_db:
         raise HTTPException(status_code=404, detail="Usuário não encontrado.")
-
-    if user_db.credits is None:
-        user_db.credits = 0
-
-    if user_db.credits <= 0:
+    if user_db.credits is None or user_db.credits <= 0:
         raise HTTPException(
             status_code=402,
             detail="Você não tem créditos suficientes.",
         )
-
     user_db.credits -= 1
     return user_db
 
 
 def _notas_por_competencia(resultado_json: Dict[str, Any]) -> Dict[int, int]:
-    """
-    Lê o campo 'competencias' retornado pela IA e devolve
-    {1: nota_comp1, 2: nota_comp2, ...}
-    """
     notas = {}
     comps = resultado_json.get("competencias") or []
     if isinstance(comps, list):
         for comp in comps:
-            if not isinstance(comp, dict):
-                continue
-            cid = comp.get("id")
-            nota = comp.get("nota")
-            if isinstance(cid, int) and isinstance(nota, int):
-                notas[cid] = nota
+            if isinstance(comp, dict):
+                cid = comp.get("id")
+                nota = comp.get("nota")
+                if isinstance(cid, int) and isinstance(nota, int):
+                    notas[cid] = nota
     return notas
 
 
@@ -183,30 +141,19 @@ async def app_corrigir_texto_enem(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """
-    Endpoint usado pelo front:
-    - debita 1 crédito
-    - chama a IA
-    - salva a redação + correção na tabela essays
-    - retorna o JSON da IA + créditos atualizados
-    """
     _require_credits(current_user)
-
     prompt_completo = (
         f"{PROMPT_ENEM_CORRECTOR}\n\n"
-        f"TEMA DA PROPOSTA DE REDAÇÃO (ENEM):\n\"{payload.tema}\"\n\n"
+        f'TEMA DA PROPOSTA DE REDAÇÃO (ENEM):\n"{payload.tema}"\n\n'
         "Avalie a redação considerando rigorosamente a adequação a esse tema, "
         "especialmente na Competência 2.\n\n"
         "REDAÇÃO DO ALUNO:\n"
         f"{payload.texto}"
     )
-
     resultado_json = await gerar_correcao_openai(prompt_completo)
-
     notas_comp = _notas_por_competencia(resultado_json)
     nota_final = resultado_json.get("nota_final")
     nota_final_int = int(nota_final) if isinstance(nota_final, (int, float)) else None
-
     essay = Essay(
         user_id=current_user.id,
         tema=payload.tema,
@@ -220,15 +167,11 @@ async def app_corrigir_texto_enem(
         c5_nota=notas_comp.get(5),
         resultado_json=json.dumps(resultado_json, ensure_ascii=False),
     )
-
-    # 🔑 debita crédito no usuário da sessão atual
     user_db = _debitar_credito(db, current_user)
-
     db.add(essay)
     db.commit()
     db.refresh(user_db)
     db.refresh(essay)
-
     return {
         "credits": user_db.credits,
         "resultado": resultado_json,
@@ -248,98 +191,67 @@ async def app_corrigir_arquivo_enem(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """
-    Versão app da correção via arquivo:
-    - recebe tema + arquivo (imagem/pdf)
-    - extrai o texto
-    - chama a IA
-    - salva arquivo em /uploads -> MUDADO PARA S3
-    - salva redação + correção na tabela essays
-    """
     _require_credits(current_user)
-
     content_type = (arquivo.content_type or "").lower()
-
-    # Lê o conteúdo uma vez para guardar o arquivo
     raw_bytes = await arquivo.read()
     if not raw_bytes:
         raise HTTPException(status_code=400, detail="Arquivo vazio.")
 
-    # --- LÓGICA DE SALVAR LOCAL REMOVIDA ---
-    # uploads_dir = Path("uploads")
-    # ...
-    # with open(filepath, "wb") as f:
-    #     f.write(raw_bytes)
-    
-    # +++ NOVA LÓGICA: Salva o arquivo no S3 +++
-    if not S3_BUCKET or not AWS_ACCESS_KEY_ID or not AWS_SECRET_ACCESS_KEY or not AWS_REGION:
-        raise HTTPException(status_code=500, detail="Servidor não configurado para upload de arquivos S3.")
-
-    ext = Path(arquivo.filename or "redacao").suffix or ".bin"
-    filename = f"{datetime.utcnow().strftime('%Y%m%d%H%M%S')}_{current_user.id}{ext}"
-    filepath_s3_key = f"uploads/{filename}" # Caminho no S3
-
-    arquivo_url_s3 = "" # URL final
+    # +++ LÓGICA CLOUDINARY +++
+    arquivo_url_final = ""
+    upload_result = {}
     try:
-        s3_client.put_object(
-            Bucket=S3_BUCKET,
-            Key=filepath_s3_key,
-            Body=BytesIO(raw_bytes), # Reusa os bytes já lidos
-            ContentType=content_type,
-            # ACL="public-read" # Descomente se seu bucket for público
+        upload_result = cloudinary.uploader.upload(
+            BytesIO(raw_bytes),
+            resource_type="auto",
+            folder="cooorrige_uploads",  # Organiza numa pasta
+            public_id=f"redacao_{current_user.id}_{datetime.utcnow().timestamp()}",
         )
-        # Assumindo ACL public-read ou bucket público.
-        # Para buckets privados, você precisaria gerar uma URL assinada.
-        arquivo_url_s3 = f"https://{S3_BUCKET}.s3.{AWS_REGION}.amazonaws.com/{filepath_s3_key}"
-
-    except NoCredentialsError:
-        raise HTTPException(status_code=500, detail="Credenciais S3 não configuradas no servidor.")
+        arquivo_url_final = upload_result.get("secure_url")
+        if not arquivo_url_final:
+            raise Exception("Cloudinary não retornou uma URL.")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erro ao salvar arquivo no S3: {str(e)}")
-    # --- Fim da lógica S3 ---
-
-
-    # 🔁 Reseta o ponteiro do arquivo para o início
-    # (Necessário pois `extrair_texto` também lê o arquivo)
-    await arquivo.seek(0)
-
-    # Extrai texto conforme o tipo
-    if content_type in ["image/jpeg", "image/jpg", "image/png"]:
-        texto_extraido = await extrair_texto_imagem(arquivo)
-    elif content_type == "application/pdf":
-        texto_extraido = await extrair_texto_pdf(arquivo)
-    else:
-        # Limpa o arquivo do S3 se o tipo for inválido
-        s3_client.delete_object(Bucket=S3_BUCKET, Key=filepath_s3_key)
+        print(f"ERRO CLOUDINARY: {e}")
         raise HTTPException(
-            status_code=400,
-            detail=(
-                "Tipo de arquivo não suportado. "
-                "Use jpeg/jpg/png para imagem ou application/pdf para PDF."
-            ),
+            status_code=500, detail=f"Erro ao salvar arquivo no Cloudinary: {str(e)}"
         )
+    # --- Fim da lógica Cloudinary ---
+
+    await arquivo.seek(0)
+    texto_extraido = ""
+    try:
+        if content_type in ["image/jpeg", "image/jpg", "image/png"]:
+            texto_extraido = await extrair_texto_imagem(arquivo)
+        elif content_type == "application/pdf":
+            texto_extraido = await extrair_texto_pdf(arquivo)
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="Tipo de arquivo não suportado. Use jpeg/jpg/png ou PDF.",
+            )
+    except Exception as e:
+        if "public_id" in upload_result:
+            cloudinary.uploader.destroy(upload_result["public_id"])
+        raise e
 
     prompt_completo = (
         f"{PROMPT_ENEM_CORRECTOR}\n\n"
-        f"TEMA DA PROPOSTA DE REDAÇÃO (ENEM):\n\"{tema}\"\n\n"
+        f'TEMA DA PROPOSTA DE REDAÇÃO (ENEM):\n"{tema}"\n\n'
         "Avalie a redação considerando rigorosamente a adequação a esse tema, "
         "especialmente na Competência 2.\n\n"
         "REDAÇÃO DO ALUNO (transcrita do arquivo enviado):\n"
         f"{texto_extraido}"
     )
-
     resultado_json = await gerar_correcao_openai(prompt_completo)
-
     notas_comp = _notas_por_competencia(resultado_json)
     nota_final = resultado_json.get("nota_final")
     nota_final_int = int(nota_final) if isinstance(nota_final, (int, float)) else None
-
     essay = Essay(
         user_id=current_user.id,
         tema=tema,
         input_type="arquivo",
         texto=texto_extraido,
-        arquivo_path=arquivo_url_s3, # Salva a URL do S3
+        arquivo_path=arquivo_url_final,  # Salva a URL do Cloudinary
         nota_final=nota_final_int,
         c1_nota=notas_comp.get(1),
         c2_nota=notas_comp.get(2),
@@ -348,15 +260,11 @@ async def app_corrigir_arquivo_enem(
         c5_nota=notas_comp.get(5),
         resultado_json=json.dumps(resultado_json, ensure_ascii=False),
     )
-
-    # 🔑 debita crédito no usuário da sessão atual
     user_db = _debitar_credito(db, current_user)
-
     db.add(essay)
     db.commit()
     db.refresh(user_db)
     db.refresh(essay)
-
     return {
         "credits": user_db.credits,
         "resultado": resultado_json,
@@ -374,35 +282,25 @@ def historico_enem(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """
-    Retorna o histórico de redações do usuário logado + estatísticas simples
-    para acompanhar a evolução.
-    """
     essays: List[Essay] = (
         db.query(Essay)
         .filter(Essay.user_id == current_user.id)
         .order_by(Essay.created_at.asc())
         .all()
     )
-
     historico = []
     notas = []
-
     for essay in essays:
         try:
             resultado = json.loads(essay.resultado_json)
         except Exception:
             resultado = None
-
         if essay.nota_final is not None:
             notas.append(essay.nota_final)
-
-        # MUDANÇA: 'arquivo_path' agora é a URL completa do S3.
-        # Não precisamos mais montar a URL com "/uploads/".
-        arquivo_url = None
-        if essay.arquivo_path:
-            arquivo_url = essay.arquivo_path # Apenas repassa a URL salva
-
+        
+        # 'arquivo_path' já é a URL completa do Cloudinary
+        arquivo_url = essay.arquivo_path
+        
         historico.append(
             {
                 "id": essay.id,
@@ -421,7 +319,6 @@ def historico_enem(
                 "resultado": resultado,
             }
         )
-
     stats = {}
     if notas:
         stats = {
@@ -430,5 +327,4 @@ def historico_enem(
             "pior_nota": min(notas),
             "ultima_nota": notas[-1],
         }
-
     return {"total": len(essays), "stats": stats, "historico": historico}

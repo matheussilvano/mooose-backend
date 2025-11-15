@@ -19,7 +19,7 @@ class UserRead(BaseModel):
     credits: int
 
     class Config:
-        orm_mode = True
+        from_attributes = True  # <-- MUDANÇA AQUI
 
 
 class Token(BaseModel):
