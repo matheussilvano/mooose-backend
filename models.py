@@ -1,3 +1,4 @@
+# models.py
 from datetime import datetime
 
 from sqlalchemy import (
@@ -22,6 +23,9 @@ class User(Base):
     email = Column(String, unique=True, index=True, nullable=False)
     full_name = Column(String, nullable=True)
     hashed_password = Column(String, nullable=False)
+    
+    # NOVO CAMPO PARA VERIFICAÇÃO DE E-MAIL
+    is_verified = Column(Boolean, default=False, nullable=False)
 
     # créditos para correção de redações
     credits = Column(Integer, default=0)
@@ -81,7 +85,9 @@ class Essay(Base):
     input_type = Column(String, nullable=False)  # "texto" ou "arquivo"
 
     texto = Column(Text, nullable=True)         # texto da redação (digitado ou extraído)
-    arquivo_path = Column(String, nullable=True)  # caminho do arquivo salvo (imagem/pdf)
+    
+    # Este campo agora salvará a URL completa (ex: do S3)
+    arquivo_path = Column(String, nullable=True)  # caminho/URL do arquivo salvo (imagem/pdf)
 
     nota_final = Column(Integer, nullable=True)
     c1_nota = Column(Integer, nullable=True)
@@ -94,3 +100,11 @@ class Essay(Base):
     resultado_json = Column(Text, nullable=False)
 
     user = relationship("User", back_populates="essays")
+
+class DemoKeyUsage(Base):
+    __tablename__ = "demo_key_usage"
+
+    id = Column(Integer, primary_key=True, index=True)
+    key = Column(String, unique=True, index=True, nullable=False)
+    used = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())

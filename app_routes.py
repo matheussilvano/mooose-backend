@@ -1,5 +1,8 @@
 # app_routes.py
 import json
+import os # NOVO
+import boto3 # NOVO
+from botocore.exceptions import NoCredentialsError # NOVO
 from datetime import datetime
 from io import BytesIO
 from pathlib import Path
@@ -28,6 +31,19 @@ from corrige_redacao_enem import (
 from schemas import EnemTextRequest
 
 router = APIRouter(prefix="/app", tags=["app"])
+
+# NOVO: Configuração S3 (lê do ambiente)
+S3_BUCKET = os.environ.get("S3_BUCKET_NAME")
+AWS_ACCESS_KEY_ID = os.environ.get("AWS_ACCESS_KEY_ID")
+AWS_SECRET_ACCESS_KEY = os.environ.get("AWS_SECRET_ACCESS_KEY")
+AWS_REGION = os.environ.get("AWS_REGION")
+
+s3_client = boto3.client(
+    "s3",
+    aws_access_key_id=AWS_ACCESS_KEY_ID,
+    aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
+    region_name=AWS_REGION
+)
 
 
 class SimulateCheckout(BaseModel):
@@ -237,7 +253,7 @@ async def app_corrigir_arquivo_enem(
     - recebe tema + arquivo (imagem/pdf)
     - extrai o texto
     - chama a IA
-    - salva arquivo em /uploads
+    - salva arquivo em /uploads -> MUDADO PARA S3
     - salva redação + correção na tabela essays
     """
     _require_credits(current_user)
@@ -249,18 +265,43 @@ async def app_corrigir_arquivo_enem(
     if not raw_bytes:
         raise HTTPException(status_code=400, detail="Arquivo vazio.")
 
-    # Salva o arquivo em disco
-    uploads_dir = Path("uploads")
-    uploads_dir.mkdir(parents=True, exist_ok=True)
+    # --- LÓGICA DE SALVAR LOCAL REMOVIDA ---
+    # uploads_dir = Path("uploads")
+    # ...
+    # with open(filepath, "wb") as f:
+    #     f.write(raw_bytes)
+    
+    # +++ NOVA LÓGICA: Salva o arquivo no S3 +++
+    if not S3_BUCKET or not AWS_ACCESS_KEY_ID or not AWS_SECRET_ACCESS_KEY or not AWS_REGION:
+        raise HTTPException(status_code=500, detail="Servidor não configurado para upload de arquivos S3.")
 
     ext = Path(arquivo.filename or "redacao").suffix or ".bin"
     filename = f"{datetime.utcnow().strftime('%Y%m%d%H%M%S')}_{current_user.id}{ext}"
-    filepath = uploads_dir / filename
-    with open(filepath, "wb") as f:
-        f.write(raw_bytes)
+    filepath_s3_key = f"uploads/{filename}" # Caminho no S3
+
+    arquivo_url_s3 = "" # URL final
+    try:
+        s3_client.put_object(
+            Bucket=S3_BUCKET,
+            Key=filepath_s3_key,
+            Body=BytesIO(raw_bytes), # Reusa os bytes já lidos
+            ContentType=content_type,
+            # ACL="public-read" # Descomente se seu bucket for público
+        )
+        # Assumindo ACL public-read ou bucket público.
+        # Para buckets privados, você precisaria gerar uma URL assinada.
+        arquivo_url_s3 = f"https://{S3_BUCKET}.s3.{AWS_REGION}.amazonaws.com/{filepath_s3_key}"
+
+    except NoCredentialsError:
+        raise HTTPException(status_code=500, detail="Credenciais S3 não configuradas no servidor.")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro ao salvar arquivo no S3: {str(e)}")
+    # --- Fim da lógica S3 ---
+
 
     # 🔁 Reseta o ponteiro do arquivo para o início
-    arquivo.file.seek(0)
+    # (Necessário pois `extrair_texto` também lê o arquivo)
+    await arquivo.seek(0)
 
     # Extrai texto conforme o tipo
     if content_type in ["image/jpeg", "image/jpg", "image/png"]:
@@ -268,6 +309,8 @@ async def app_corrigir_arquivo_enem(
     elif content_type == "application/pdf":
         texto_extraido = await extrair_texto_pdf(arquivo)
     else:
+        # Limpa o arquivo do S3 se o tipo for inválido
+        s3_client.delete_object(Bucket=S3_BUCKET, Key=filepath_s3_key)
         raise HTTPException(
             status_code=400,
             detail=(
@@ -296,7 +339,7 @@ async def app_corrigir_arquivo_enem(
         tema=tema,
         input_type="arquivo",
         texto=texto_extraido,
-        arquivo_path=str(filepath),
+        arquivo_path=arquivo_url_s3, # Salva a URL do S3
         nota_final=nota_final_int,
         c1_nota=notas_comp.get(1),
         c2_nota=notas_comp.get(2),
@@ -354,9 +397,11 @@ def historico_enem(
         if essay.nota_final is not None:
             notas.append(essay.nota_final)
 
+        # MUDANÇA: 'arquivo_path' agora é a URL completa do S3.
+        # Não precisamos mais montar a URL com "/uploads/".
         arquivo_url = None
         if essay.arquivo_path:
-            arquivo_url = "/uploads/" + Path(essay.arquivo_path).name
+            arquivo_url = essay.arquivo_path # Apenas repassa a URL salva
 
         historico.append(
             {
