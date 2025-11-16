@@ -1,4 +1,3 @@
-# auth_routes.py
 import os
 from datetime import datetime, timedelta
 from typing import Optional
@@ -73,6 +72,18 @@ def create_verification_token(email: str) -> str:
     to_encode = {"exp": expires, "sub_email": email}
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
+# --- NOVO HELPER: Token de redefinição de senha ---
+def create_password_reset_token(email: str) -> str:
+    # Token mais curto, expira em 1 hora
+    expires = datetime.utcnow() + timedelta(hours=1)
+    to_encode = {
+        "exp": expires,
+        "sub_email": email,
+        "sub_type": "password_reset" # Para diferenciar de outros tokens
+    }
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+
 # Helper para enviar o e-mail
 async def send_verification_email(email: str, token: str):
     frontend_url = os.environ.get("FRONTEND_URL", "http://127.0.0.1:5500") # Use a URL do seu front na Vercel
@@ -102,6 +113,35 @@ async def send_verification_email(email: str, token: str):
         # Em produção, você deve logar isso
         # Não lançar exceção aqui para não travar o registro se o e-mail falhar
         pass
+
+# --- NOVO HELPER: Enviar e-mail de redefinição de senha ---
+async def send_password_reset_email(email: str, token: str):
+    frontend_url = os.environ.get("FRONTEND_URL", "http://127.0.0.1:5500")
+    
+    # Aponta para a nova página 'reset-password.html'
+    reset_link = f"{frontend_url}/reset-password.html?token={token}"
+
+    html = f"""
+    <p>Olá!</p>
+    <p>Recebemos uma solicitação para redefinir sua senha na plataforma Cooorrige. Se não foi você, ignore este e-mail.</p>
+    <p>Para criar uma nova senha, clique no link abaixo:</p>
+    <p><a href="{reset_link}" style="color: blue; text-decoration: underline;">Redefinir minha Senha</a></p>
+    <p>Este link é válido por 1 hora.</p>
+    """
+
+    message = MessageSchema(
+        subject="Redefinição de senha do Cooorrige",
+        recipients=[email],
+        body=html,
+        subtype="html"
+    )
+    
+    try:
+        fm = FastMail(conf)
+        await fm.send_message(message)
+    except Exception as e:
+        print(f"ERRO AO ENVIAR E-MAIL DE RESET para {email}: {e}")
+        pass # Não informe ao usuário se o e-mail falhou, por segurança
 
 
 async def get_current_user(
@@ -213,3 +253,57 @@ def verify_email_route(token: str, db: Session = Depends(get_db)):
     db.commit()
     
     return {"message": "E-mail verificado com sucesso! Você já pode fazer login."}
+
+# --- NOVA ROTA: Solicitar redefinição de senha ---
+@router.post("/forgot-password")
+async def forgot_password(
+    payload: schemas.ForgotPasswordRequest, 
+    db: Session = Depends(get_db)
+):
+    # Por segurança, NUNCA retorne 404 se o usuário não existir.
+    # Apenas não faça nada e retorne 200.
+    user = get_user_by_email(db, payload.email)
+    
+    # Só enviamos se o usuário existir E já tiver verificado o e-mail
+    if user and user.is_verified:
+        try:
+            token = create_password_reset_token(user.email)
+            await send_password_reset_email(user.email, token)
+        except Exception as e:
+            # Log o erro, mas não informe ao usuário
+            print(f"ALERTA: Falha ao enviar e-mail de RESET para {user.email}: {e}")
+            
+    return {"message": "Se uma conta ativa e verificada existir para este e-mail, um link de redefinição foi enviado."}
+
+# --- NOVA ROTA: Redefinir a senha com o token ---
+@router.post("/reset-password")
+def reset_password(
+    payload: schemas.ResetPasswordRequest, 
+    db: Session = Depends(get_db)
+):
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="Token de redefinição inválido ou expirado.",
+    )
+    try:
+        payload_dict = jwt.decode(payload.token, SECRET_KEY, algorithms=[ALGORITHM])
+        
+        email: str = payload_dict.get("sub_email")
+        sub_type: str = payload_dict.get("sub_type")
+        
+        if email is None or sub_type != "password_reset":
+            raise credentials_exception
+            
+    except JWTError:
+        raise credentials_exception
+
+    user = get_user_by_email(db, email)
+    if user is None:
+        raise HTTPException(status_code=404, detail="Usuário não encontrado.")
+    
+    # Atualiza a senha
+    user.hashed_password = get_password_hash(payload.new_password)
+    db.add(user)
+    db.commit()
+    
+    return {"message": "Senha atualizada com sucesso! Você já pode fazer login com a nova senha."}

@@ -1,5 +1,4 @@
-# main.py
-import os # NOVO
+import os
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -55,7 +54,14 @@ async def root():
         "status": "ok",
         "message": "Cooorrige by Mooose API está ativa.",
         "modules": {
-            "auth": ["/auth/register", "/auth/login", "/auth/me", "/auth/verify-email"], # Add nova rota
+            "auth": [
+                "/auth/register",
+                "/auth/login",
+                "/auth/me",
+                "/auth/verify-email",
+                "/auth/forgot-password",  # NOVO
+                "/auth/reset-password", # NOVO
+            ],
             "app": [
                 "/app/checkout/simular",
                 "/app/enem/corrigir-texto",

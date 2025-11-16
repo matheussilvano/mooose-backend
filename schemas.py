@@ -38,3 +38,12 @@ class EnemTextRequest(BaseModel):
 
 class CheckoutSimulateRequest(BaseModel):
     plano: Literal["solo", "intensivo", "unlimited"]
+
+# --- NOVAS CLASSES ADICIONADAS ABAIXO ---
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str
