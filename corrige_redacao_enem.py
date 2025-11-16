@@ -502,7 +502,7 @@ async def gerar_correcao_openai(prompt_completo: str):
         response = client.responses.create(
             model=OPENAI_MODEL,
             input=prompt_completo,
-            temperature=0.1,
+            temperature=0.2,
         )
 
         raw_text = (response.output_text or "").strip()
