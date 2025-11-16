@@ -32,16 +32,23 @@ app = FastAPI(
 # NOVO: Pega a URL do front do ambiente (Vercel)
 # Em dev local, você pode não definir a variável,
 # ou criar um .env e usar python-dotenv
-FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://127.0.0.1:5500")
+FRONTEND_URL_1 = os.environ.get("FRONTEND_URL", "http://127.0.0.1:5500")
+FRONTEND_URL_2 = os.environ.get("FRONTEND_URL_2") 
 
-# CORS – Restrito para o domínio do front
+allowed_origins = ["http://localhost:5500"]
+
+for url in (FRONTEND_URL_1, FRONTEND_URL_2):
+    if url and url not in allowed_origins:
+        allowed_origins.append(url)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[FRONTEND_URL, "http://localhost:5500"], # Permite o front e dev local
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 # --- REMOVIDO: Não vamos mais servir arquivos estáticos de 'uploads' ---
 # app.mount("/uploads", StaticFiles(directory=str(UPLOADS_DIR)), name="uploads")
