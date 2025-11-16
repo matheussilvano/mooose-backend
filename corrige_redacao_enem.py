@@ -38,7 +38,7 @@ if not OPENAI_API_KEY:
     )
 
 # Modelo default – pode sobrescrever com OPENAI_MODEL no ambiente
-OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5-mini")
+OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4.1-mini")
 
 client = OpenAI(api_key=OPENAI_API_KEY)
 
