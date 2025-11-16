@@ -358,13 +358,13 @@ INSTRUÇÕES FINAIS DE AVALIAÇÃO E FORMATO DA RESPOSTA
 
 {
   "nota_final": <soma das notas>,
-  "analise_geral": "<um parágrafo com o resumo do desempenho do aluno, destacando os pontos fortes e as principais áreas para melhoria. Inclua sempre um comentário explícito sobre a adequação ou não ao tema proposto (plena adequação, tangenciamento ou fuga total) e 2–3 sugestões de melhoria globais.>",
+  "analise_geral": "<**Resumo geral:** um parágrafo com o desempenho do aluno, destacando os principais pontos fortes e fragilidades.\n\n**Adequação ao tema:** comentário explícito indicando se houve plena adequação, tangenciamento ou fuga total ao tema proposto.\n\n**Sugestões de melhoria globais:** 2–3 orientações objetivas sobre como o aluno pode evoluir nas próximas redações.>",
   "competencias": [
-    { "id": 1, "nota": <nota_c1>, "feedback": "<feedback_c1 com diagnóstico + sugestões práticas, incluindo exemplos concretos quando possível.>" },
-    { "id": 2, "nota": <nota_c2>, "feedback": "<feedback_c2 com diagnóstico + sugestões de repertório e de abordagem mais adequada ao tema.>" },
-    { "id": 3, "nota": <nota_c3>, "feedback": "<feedback_c3 com diagnóstico + sugestões de como aprofundar e organizar melhor os argumentos.>" },
-    { "id": 4, "nota": <nota_c4>, "feedback": "<feedback_c4 com diagnóstico + lista de conectivos específicos que poderiam ser usados para melhorar a coesão.>" },
-    { "id": 5, "nota": <nota_c5>, "feedback": "<feedback_c5 com diagnóstico + sugestões de agentes, ações, meios, detalhamentos e finalidades que deixariam a intervenção mais completa.>" }
+    { "id": 1, "nota": <nota_c1>, "feedback": "<**Forças:** destaque os pontos positivos relacionados ao domínio da norma culta.\n\n**O que melhorar:** aponte os principais problemas de gramática, ortografia e pontuação.\n\n**Sugestões práticas:** indique ações específicas (como revisar períodos longos, simplificar frases ou reler o texto em voz alta), incluindo exemplos concretos quando possível.>" },
+    { "id": 2, "nota": <nota_c2>, "feedback": "<**Forças:** destaque os pontos positivos na compreensão do tema e no uso de repertório.\n\n**O que melhorar:** explique em que medida houve superficialidade, tangenciamento ou problemas na abordagem do tema.\n\n**Sugestões práticas:** sugira repertórios possíveis (como Constituição Federal, ONU, OMS, dados do IBGE etc.) e maneiras mais adequadas de relacioná-los ao tema.>" },
+    { "id": 3, "nota": <nota_c3>, "feedback": "<**Forças:** indique os pontos positivos na seleção e organização dos argumentos.\n\n**O que melhorar:** aponte onde os argumentos foram frágeis, repetitivos ou mal organizados.\n\n**Sugestões práticas:** oriente como aprofundar a argumentação (por exemplo, explicando causas e consequências, trazendo exemplos concretos, comparações ou dados).>" },
+    { "id": 4, "nota": <nota_c4>, "feedback": "<**Forças:** destaque os aspectos positivos da coesão e do encadeamento das ideias.\n\n**O que melhorar:** indique onde há saltos lógicos, repetições excessivas ou problemas de conexão entre períodos e parágrafos.\n\n**Sugestões práticas:** sugira conectivos específicos que poderiam ser usados, como 'além disso', 'ademais', 'no entanto', 'por outro lado', 'portanto', 'assim', 'desse modo'.>" },
+    { "id": 5, "nota": <nota_c5>, "feedback": "<**Forças:** aponte os aspectos positivos da proposta de intervenção (claridade, pertinência, presença de elementos). \n\n**O que melhorar:** indique quais elementos (agente, ação, modo/meio, detalhamento, finalidade) estão ausentes, vagos ou pouco ligados ao problema.\n\n**Sugestões práticas:** sugira agentes (como Ministério da Saúde, Ministério da Educação, escolas, famílias, ONGs), ações, meios e finalidades mais específicos, oferecendo um modelo de frase de intervenção mais completo.>" }
   ]
 }
 
@@ -502,7 +502,7 @@ async def gerar_correcao_openai(prompt_completo: str):
         response = client.responses.create(
             model=OPENAI_MODEL,
             input=prompt_completo,
-            temperature=0,
+            temperature=0.1,
         )
 
         raw_text = (response.output_text or "").strip()
