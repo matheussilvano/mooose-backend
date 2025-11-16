@@ -38,7 +38,7 @@ if not OPENAI_API_KEY:
     )
 
 # Modelo default – pode sobrescrever com OPENAI_MODEL no ambiente
-OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4.1-mini")
+OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5-mini")
 
 client = OpenAI(api_key=OPENAI_API_KEY)
 
@@ -256,10 +256,33 @@ REGRAS POR COMPETÊNCIA (RESUMO)
   - 80 ou menos: coesão muito ruim, com prejuízo sério à compreensão.
 
 - Competência 5 (Proposta de intervenção):
-  - 200: proposta completa, detalhada, compatível com o problema discutido.
-  - 160: proposta presente e relativamente completa, mas com pouco detalhamento.
-  - 120: proposta vaga ou incompleta.
-  - 80 ou menos: ausência ou quase ausência de proposta.
+  - Avalie SEMPRE se a proposta contém, de forma identificável:
+    - agente,
+    - ação,
+    - modo/meio,
+    - detalhamento,
+    - finalidade.
+
+  REGRAS DE NOTA (RÍGIDAS):
+
+  - 200: proposta completa, com os cinco elementos presentes, claros e bem detalhados,
+    articulados com o problema discutido.
+
+  - 160: os cinco elementos estão presentes, mas o detalhamento é simples ou pouco aprofundado,
+    OU há 4 elementos muito bem construídos e 1 um pouco menos claro.
+
+  - 120: apenas 3 ou 4 elementos aparecem de forma reconhecível, ou todos aparecem mas
+    de forma muito vaga / genérica, com pouco vínculo com o desenvolvimento do texto.
+
+  - 80: 1 ou 2 elementos apenas, ou proposta muito vaga, pouco relacionada à discussão.
+
+  - 40 ou 0: ausência prática de proposta de intervenção.
+
+  ATENÇÃO (REGRA DE COERÊNCIA OBRIGATÓRIA):
+  - Se na sua análise você afirmar que a proposta "contempla os cinco elementos exigidos"
+    ou equivalentes (por exemplo: "apresenta todos os elementos da intervenção"), ENTÃO
+    a nota da Competência 5 NÃO pode ser menor que 160.
+  - Nunca descreva uma proposta como completa (com 5 elementos) e atribua 120, 80, 40 ou 0.
 
 ====================================================
 INSTRUÇÕES FINAIS DE AVALIAÇÃO E FORMATO DA RESPOSTA
