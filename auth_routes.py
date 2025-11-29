@@ -93,13 +93,13 @@ async def send_verification_email(email: str, token: str):
 
     html = f"""
     <p>Olá!</p>
-    <p>Obrigado por se cadastrar no Cooorrige. Por favor, clique no link abaixo para verificar seu e-mail:</p>
+    <p>Obrigado por se cadastrar na Mooose. Por favor, clique no link abaixo para verificar seu e-mail:</p>
     <p><a href="{verification_link}" style="color: blue; text-decoration: underline;">Verificar meu E-mail</a></p>
     <p>Se você não se cadastrou, por favor ignore este e-mail.</p>
     """
 
     message = MessageSchema(
-        subject="Confirme seu cadastro no Cooorrige",
+        subject="Confirme seu cadastro na Mooose",
         recipients=[email],
         body=html,
         subtype="html"
@@ -123,14 +123,14 @@ async def send_password_reset_email(email: str, token: str):
 
     html = f"""
     <p>Olá!</p>
-    <p>Recebemos uma solicitação para redefinir sua senha na plataforma Cooorrige. Se não foi você, ignore este e-mail.</p>
+    <p>Recebemos uma solicitação para redefinir sua senha na plataforma Mooose. Se não foi você, ignore este e-mail.</p>
     <p>Para criar uma nova senha, clique no link abaixo:</p>
     <p><a href="{reset_link}" style="color: blue; text-decoration: underline;">Redefinir minha Senha</a></p>
     <p>Este link é válido por 1 hora.</p>
     """
 
     message = MessageSchema(
-        subject="Redefinição de senha do Cooorrige",
+        subject="Redefinição de senha da Mooose",
         recipients=[email],
         body=html,
         subtype="html"
