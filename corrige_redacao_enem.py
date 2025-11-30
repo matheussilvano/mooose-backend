@@ -396,7 +396,7 @@ INSTRUÇÕES FINAIS DE AVALIAÇÃO E FORMATO DA RESPOSTA
 }
 
 CHECKLIST RÁPIDO ANTES DE RESPONDER:
-- Usei apenas notas 0, 40, 80, 120, 160 ou 200 em todas as competências?
+- Usei apenas notas 0, 40, 80, 120, 160 ou 200 em todas as competências? Caso contrário, arredonde pra cima (ex: 150 → 160, 180 → 200).
 - Somei corretamente as notas e coloquei o valor certo em "nota_final"?
 - A "nota_final" está coerente com minha impressão global ("muito fraca", "fraca", "mediana", "boa" ou "excelente")?
 - Respeitei as regras especiais de fuga total ao tema e tangenciamento (limites em C2, C3 e faixas de nota)?
