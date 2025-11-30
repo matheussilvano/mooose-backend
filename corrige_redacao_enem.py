@@ -170,7 +170,7 @@ Use mentalmente uma redação nota 900 como âncora de qualidade:
     - 200 pontos: desenvolvimento estratégico, argumentos bem fundamentados e consistentes.
     - 160 pontos: argumentos bons, mas com algum nível de senso comum ou pouco aprofundamento.
 
-- Competência 4 (Coesão) – Nota 180:
+- Competência 4 (Coesão textual) – Nota 180:
   - Conectivos usados adequadamente, com leve repetição ou algum uso não ideal.
   - Diretriz:
     - 200 pontos: repertório variado de recursos coesivos, fluidez muito boa.
@@ -408,6 +408,48 @@ A redação do aluno para análise será enviada após o TEMA, no final deste pr
 """
 
 # ============================
+# Pós-processamento de notas
+# ============================
+
+VALID_SCORES = {0, 40, 80, 120, 160, 200}
+
+def round_enem_score_up(score: int) -> int:
+    """
+    Arredonda a nota para cima para o próximo múltiplo de 40,
+    limitado a 200. Ex:
+    - 150 -> 160
+    - 180 -> 200
+    - 200 -> 200
+    """
+    if score is None:
+        return 0
+    try:
+        score = int(score)
+    except (TypeError, ValueError):
+        return 0
+
+    if score <= 0:
+        return 0
+    if score >= 200:
+        return 200
+
+    # Se já for um dos valores válidos, mantém
+    if score in VALID_SCORES:
+        return score
+
+    # Arredonda pra cima pro próximo múltiplo de 40
+    resto = score % 40
+    if resto == 0:
+        rounded = score
+    else:
+        rounded = score + (40 - resto)
+
+    if rounded > 200:
+        rounded = 200
+
+    return rounded
+
+# ============================
 # Funções auxiliares
 # ============================
 
@@ -495,7 +537,7 @@ async def extrair_texto_pdf(arquivo: UploadFile) -> str:
         if len(content) > MAX_FILE_SIZE_BYTES:
             raise HTTPException(
                 status_code=413,
-            detail="Arquivo PDF muito grande (máx. 5 MB).",
+                detail="Arquivo PDF muito grande (máx. 5 MB).",
             )
 
         logger.info(
@@ -531,6 +573,9 @@ async def gerar_correcao_openai(prompt_completo: str):
     """
     Chama a API da OpenAI com o prompt completo e retorna o JSON carregado.
     Usa o endpoint Responses. O prompt obriga a saída em JSON.
+    Depois de carregar o JSON, faz o pós-processamento das notas:
+    - Arredonda cada nota de competência para o próximo múltiplo de 40 (até 200).
+    - Recalcula a nota_final como soma das competências ajustadas.
     """
     try:
         logger.info("[OPENAI] Solicitando correção de redação...")
@@ -543,7 +588,7 @@ async def gerar_correcao_openai(prompt_completo: str):
         raw_text = (response.output_text or "").strip()
 
         try:
-            return json.loads(raw_text)
+            data = json.loads(raw_text)
         except json.JSONDecodeError as e:
             logger.error(
                 "Falha ao decodificar JSON. Resposta bruta da OpenAI: %s", raw_text
@@ -552,6 +597,26 @@ async def gerar_correcao_openai(prompt_completo: str):
                 status_code=500,
                 detail="Falha ao interpretar resposta da OpenAI como JSON.",
             ) from e
+
+        # ============================
+        # Pós-processamento das notas
+        # ============================
+        competencias = data.get("competencias", [])
+        soma = 0
+
+        if isinstance(competencias, list):
+            for comp in competencias:
+                if not isinstance(comp, dict):
+                    continue
+                nota_original = comp.get("nota", 0)
+                nota_ajustada = round_enem_score_up(nota_original)
+                comp["nota"] = nota_ajustada
+                soma += nota_ajustada
+
+        # Atualiza a nota_final com a soma das competências ajustadas
+        data["nota_final"] = soma
+
+        return data
 
     except HTTPException:
         raise
