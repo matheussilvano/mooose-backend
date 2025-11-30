@@ -97,23 +97,22 @@ def simular_checkout(
 
 
 def _require_credits(user: User):
-    if user.credits is None or user.credits <= 0:
-        raise HTTPException(
-            status_code=402,
-            detail="Você não tem créditos suficientes para corrigir uma redação.",
-        )
+    """
+    Créditos desativados: correção gratuita e ilimitada.
+    Mantemos a função para não quebrar as rotas que ainda chamam ela.
+    """
+    return
 
 
 def _debitar_credito(db: Session, user: User) -> User:
+    """
+    Não debita mais créditos. Apenas garante que o usuário existe
+    e devolve o registro do banco.
+    """
     user_db = db.get(User, user.id)
     if not user_db:
         raise HTTPException(status_code=404, detail="Usuário não encontrado.")
-    if user_db.credits is None or user_db.credits <= 0:
-        raise HTTPException(
-            status_code=402,
-            detail="Você não tem créditos suficientes.",
-        )
-    user_db.credits -= 1
+    # NÃO altera user_db.credits (free ilimitado)
     return user_db
 
 
@@ -297,10 +296,10 @@ def historico_enem(
             resultado = None
         if essay.nota_final is not None:
             notas.append(essay.nota_final)
-        
+
         # 'arquivo_path' já é a URL completa do Cloudinary
         arquivo_url = essay.arquivo_path
-        
+
         historico.append(
             {
                 "id": essay.id,
