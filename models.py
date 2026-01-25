@@ -24,6 +24,7 @@ class User(Base):
     email = Column(String, unique=True, index=True, nullable=False)
     full_name = Column(String, nullable=True)
     hashed_password = Column(String, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
     
     # NOVO CAMPO PARA VERIFICAÇÃO DE E-MAIL
     is_verified = Column(Boolean, default=False, nullable=False)
@@ -88,9 +89,9 @@ class Essay(Base):
     __tablename__ = "essays"
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
 
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
 
     tema = Column(String, nullable=False)
     input_type = Column(String, nullable=False)  # "texto" ou "arquivo"
@@ -131,7 +132,7 @@ class EssayReview(Base):
     stars = Column(Integer, nullable=False)
     comment = Column(Text, nullable=True)
 
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
     user = relationship("User", back_populates="essay_reviews")
@@ -152,7 +153,7 @@ class MercadoPagoPayment(Base):
     credited = Column(Boolean, nullable=False, default=False)
 
     raw_json = Column(Text, nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
     user = relationship("User", back_populates="mp_payments")

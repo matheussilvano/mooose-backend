@@ -12,6 +12,7 @@ from auth_routes import router as auth_router
 from app_routes import router as app_router
 from demo_routes import router as demo_router
 from payments_routes import router as payments_router
+from admin_routes import router as admin_router
 
 # Cria tabelas do banco
 models.Base.metadata.create_all(bind=engine)
@@ -81,6 +82,13 @@ async def root():
                 "/payments/create",
                 "/webhooks/mercadopago",
             ],
+            "admin": [
+                "/admin/metrics/overview",
+                "/admin/metrics/users/created",
+                "/admin/metrics/corrections",
+                "/admin/metrics/sales",
+                "/admin/metrics/corrections/by-user",
+            ],
             "enem_raw": [
                 "POST /api/enem/corrigir-texto",
                 "POST /api/enem/corrigir-arquivo",
@@ -94,6 +102,7 @@ app.include_router(auth_router)
 app.include_router(app_router)
 app.include_router(demo_router)
 app.include_router(payments_router)
+app.include_router(admin_router)
 
 # Mantém seu router original de correção ENEM
 app.include_router(
