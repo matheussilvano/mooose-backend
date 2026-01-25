@@ -18,8 +18,11 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["payments"])
 
-# === Config Mercado Pago (TESTE) ===
+# === Config Mercado Pago ===
+MP_ENV = os.environ.get("MP_ENV", "test").lower()
+MP_ACCESS_TOKEN = os.environ.get("MP_ACCESS_TOKEN")
 MP_ACCESS_TOKEN_TEST = os.environ.get("MP_ACCESS_TOKEN_TEST")
+MP_PUBLIC_KEY = os.environ.get("MP_PUBLIC_KEY")
 MP_PUBLIC_KEY_TEST = os.environ.get("MP_PUBLIC_KEY_TEST")
 MP_WEBHOOK_SECRET = os.environ.get("MP_WEBHOOK_SECRET")
 MP_NOTIFICATION_URL = os.environ.get("MP_NOTIFICATION_URL")
@@ -34,13 +37,28 @@ PACKAGE_PRICE = 9.90
 PACKAGE_CURRENCY = "BRL"
 
 
-def _get_sdk() -> mercadopago.SDK:
+def _is_production() -> bool:
+    return MP_ENV in {"prod", "production"}
+
+
+def _get_access_token() -> str:
+    if _is_production():
+        if not MP_ACCESS_TOKEN:
+            raise HTTPException(
+                status_code=500,
+                detail="MP_ACCESS_TOKEN nao configurado no ambiente.",
+            )
+        return MP_ACCESS_TOKEN
     if not MP_ACCESS_TOKEN_TEST:
         raise HTTPException(
             status_code=500,
-            detail="MP_ACCESS_TOKEN_TEST não configurado no ambiente.",
+            detail="MP_ACCESS_TOKEN_TEST nao configurado no ambiente.",
         )
-    return mercadopago.SDK(MP_ACCESS_TOKEN_TEST)
+    return MP_ACCESS_TOKEN_TEST
+
+
+def _get_sdk() -> mercadopago.SDK:
+    return mercadopago.SDK(_get_access_token())
 
 
 def _parse_signature(x_signature: str) -> dict:
@@ -144,7 +162,10 @@ def create_payment_preference(
         )
 
     preference = (preference_response or {}).get("response") or {}
-    checkout_url = preference.get("sandbox_init_point") or preference.get("init_point")
+    if _is_production():
+        checkout_url = preference.get("init_point") or preference.get("sandbox_init_point")
+    else:
+        checkout_url = preference.get("sandbox_init_point") or preference.get("init_point")
     preference_id = preference.get("id")
     if not checkout_url or not preference_id:
         raise HTTPException(
