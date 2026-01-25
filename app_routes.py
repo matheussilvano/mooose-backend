@@ -98,21 +98,31 @@ def simular_checkout(
 
 def _require_credits(user: User):
     """
-    Créditos desativados: correção gratuita e ilimitada.
-    Mantemos a função para não quebrar as rotas que ainda chamam ela.
+    Verifica se o usuário tem créditos suficientes.
     """
-    return
+    if user.credits is None or user.credits <= 0:
+        raise HTTPException(
+            status_code=402,
+            detail="Créditos insuficientes. Compre mais créditos para continuar.",
+        )
 
 
 def _debitar_credito(db: Session, user: User) -> User:
     """
-    Não debita mais créditos. Apenas garante que o usuário existe
-    e devolve o registro do banco.
+    Debita 1 crédito do usuário e devolve o registro atualizado.
     """
     user_db = db.get(User, user.id)
     if not user_db:
         raise HTTPException(status_code=404, detail="Usuário não encontrado.")
-    # NÃO altera user_db.credits (free ilimitado)
+    if user_db.credits is None:
+        user_db.credits = 0
+    if user_db.credits <= 0:
+        raise HTTPException(
+            status_code=402,
+            detail="Créditos insuficientes. Compre mais créditos para continuar.",
+        )
+    user_db.credits -= 1
+    db.add(user_db)
     return user_db
 
 
