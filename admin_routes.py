@@ -24,7 +24,7 @@ ADMIN_EMAILS = {
     if email.strip()
 }
 
-PRICE_PER_CREDIT = float(os.environ.get("PRICE_PER_CREDIT", "9.90"))
+PRICE_PER_CREDIT = float(os.environ.get("PRICE_PER_CREDIT", "0.99"))
 
 GROUP_BY_VALUES = {"day", "week", "month"}
 MAX_BUCKETS = {"day": 366, "week": 260, "month": 120}
