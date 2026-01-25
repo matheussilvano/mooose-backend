@@ -181,7 +181,7 @@ async def register(user_in: schemas.UserCreate, db: Session = Depends(get_db)): 
         email=user_in.email,
         full_name=user_in.full_name,
         hashed_password=get_password_hash(user_in.password),
-        credits=3,  # créditos iniciais
+        credits=2,  # créditos iniciais
         is_verified=False # NOVO: começa como não verificado
     )
     db.add(user)
