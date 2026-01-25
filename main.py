@@ -84,6 +84,7 @@ async def root():
             ],
             "admin": [
                 "/admin/metrics/overview",
+                "/admin/metrics/absolute",
                 "/admin/metrics/users/created",
                 "/admin/metrics/corrections",
                 "/admin/metrics/sales",

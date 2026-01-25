@@ -202,6 +202,82 @@ def _query_series_count(
     return sorted(buckets.items(), key=lambda item: item[0])
 
 
+def _first_corrections_subquery(db: Session):
+    return (
+        db.query(
+            Essay.user_id.label("user_id"),
+            func.min(Essay.created_at).label("first_correction"),
+        )
+        .filter(Essay.nota_final.isnot(None))
+        .group_by(Essay.user_id)
+        .subquery()
+    )
+
+
+def _first_corrections_series(
+    *,
+    db: Session,
+    start_local: datetime,
+    end_local: datetime,
+    tz_name: str,
+    group_by: str,
+) -> List[Tuple[datetime, int]]:
+    subq = _first_corrections_subquery(db)
+    dialect = _dialect_name(db)
+    tz = _get_tz(tz_name)
+
+    if dialect == "postgresql":
+        bucket_expr = func.date_trunc(
+            group_by, func.timezone(tz_name, subq.c.first_correction)
+        )
+        query = (
+            db.query(bucket_expr.label("bucket"), func.count())
+            .filter(
+                subq.c.first_correction >= _to_utc(start_local),
+                subq.c.first_correction < _to_utc(end_local),
+            )
+            .group_by(bucket_expr)
+            .order_by(bucket_expr)
+        )
+        results = []
+        for row in query.all():
+            bucket = row.bucket
+            if bucket and bucket.tzinfo is None:
+                bucket = bucket.replace(tzinfo=tz)
+            results.append((bucket, int(row[1])))
+        return results
+
+    rows = db.query(subq.c.first_correction).all()
+    buckets: Dict[datetime, int] = {}
+    for (dt,) in rows:
+        if dt is None:
+            continue
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        local_dt = dt.astimezone(tz)
+        if not (start_local <= local_dt < end_local):
+            continue
+        bucket = _bucket_start(local_dt, group_by)
+        buckets[bucket] = buckets.get(bucket, 0) + 1
+    return sorted(buckets.items(), key=lambda item: item[0])
+
+
+def _first_corrections_count(
+    *,
+    db: Session,
+    start_local: Optional[datetime],
+    end_local: Optional[datetime],
+) -> int:
+    subq = _first_corrections_subquery(db)
+    query = db.query(func.count()).select_from(subq)
+    if start_local and end_local:
+        query = query.filter(
+            subq.c.first_correction >= _to_utc(start_local),
+            subq.c.first_correction < _to_utc(end_local),
+        )
+    return int(query.scalar() or 0)
+
+
 @router.get("/metrics/overview")
 def metrics_overview(
     start: Optional[str] = Query(default=None),
@@ -214,10 +290,8 @@ def metrics_overview(
     if start_local and end_local:
         start_utc = _to_utc(start_local)
         end_utc = _to_utc(end_local)
-        users_created = (
-            db.query(func.count(User.id))
-            .filter(User.created_at >= start_utc, User.created_at < end_utc)
-            .scalar()
+        users_created = _first_corrections_count(
+            db=db, start_local=start_local, end_local=end_local
         )
         corrections = (
             db.query(func.count(Essay.id))
@@ -265,7 +339,9 @@ def metrics_overview(
             .scalar()
         )
     else:
-        users_created = db.query(func.count(User.id)).scalar()
+        users_created = _first_corrections_count(
+            db=db, start_local=None, end_local=None
+        )
         corrections = (
             db.query(func.count(Essay.id))
             .filter(Essay.nota_final.isnot(None))
@@ -305,6 +381,46 @@ def metrics_overview(
     }
 
 
+@router.get("/metrics/absolute")
+def metrics_absolute(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(_require_admin),
+):
+    users_created = _first_corrections_count(
+        db=db, start_local=None, end_local=None
+    )
+    corrections = (
+        db.query(func.count(Essay.id))
+        .filter(Essay.nota_final.isnot(None))
+        .scalar()
+    )
+    sales_approved = (
+        db.query(func.count(MercadoPagoPayment.id))
+        .filter(MercadoPagoPayment.status == "approved")
+        .scalar()
+    )
+    sales_credited = (
+        db.query(func.count(MercadoPagoPayment.id))
+        .filter(MercadoPagoPayment.credited.is_(True))
+        .scalar()
+    )
+    credits_sold_credited = (
+        db.query(func.coalesce(func.sum(MercadoPagoPayment.credits), 0))
+        .filter(MercadoPagoPayment.credited.is_(True))
+        .scalar()
+    )
+    estimated_revenue = float(credits_sold_credited or 0) * PRICE_PER_CREDIT
+
+    return {
+        "users_created": int(users_created or 0),
+        "corrections": int(corrections or 0),
+        "sales_approved": int(sales_approved or 0),
+        "sales_credited": int(sales_credited or 0),
+        "credits_sold_credited": int(credits_sold_credited or 0),
+        "estimated_revenue": round(estimated_revenue, 2),
+    }
+
+
 @router.get("/metrics/users/created")
 def users_created_series(
     start: Optional[str] = Query(default=None),
@@ -317,25 +433,19 @@ def users_created_series(
     group_by = _ensure_group_by(group_by)
     start_local, end_local, tz = _parse_period(start, end, timezone, default_days=30)
     start_local, end_local = _clamp_range(start_local, end_local, group_by)
-    start_utc = _to_utc(start_local)
-    end_utc = _to_utc(end_local)
 
-    results = _query_series_count(
+    results = _first_corrections_series(
         db=db,
-        model=User,
-        date_field=User.created_at,
-        start_utc=start_utc,
-        end_utc=end_utc,
+        start_local=start_local,
+        end_local=end_local,
         tz_name=timezone,
         group_by=group_by,
     )
     buckets = _iter_buckets(start_local, end_local, group_by)
     series = _series_from_results(buckets=buckets, results=results)
 
-    total = (
-        db.query(func.count(User.id))
-        .filter(User.created_at >= start_utc, User.created_at < end_utc)
-        .scalar()
+    total = _first_corrections_count(
+        db=db, start_local=start_local, end_local=end_local
     )
     return {"total": int(total or 0), **series}
 
