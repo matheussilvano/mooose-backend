@@ -3,12 +3,12 @@ import os
 from typing import Dict, Iterable, List, Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func, distinct
+from sqlalchemy import func, distinct, case
 from sqlalchemy.orm import Session
 
 from auth_routes import get_current_user
 from database import get_db
-from models import Essay, MercadoPagoPayment, User
+from models import Essay, EssayReview, MercadoPagoPayment, User
 
 try:
     from zoneinfo import ZoneInfo
@@ -123,6 +123,15 @@ def _clamp_range(start: datetime, end: datetime, group_by: str) -> Tuple[datetim
 
 def _to_utc(dt: datetime) -> datetime:
     return dt.astimezone(timezone.utc)
+
+
+def _to_local(dt: Optional[datetime], tz_name: str) -> Optional[datetime]:
+    if not dt:
+        return None
+    tz = _get_tz(tz_name)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(tz)
 
 
 def _require_admin(current_user: User = Depends(get_current_user)) -> User:
@@ -607,6 +616,7 @@ def corrections_by_user(
             User.email,
             User.full_name,
             func.count(Essay.id).label("corrigidas"),
+            func.max(Essay.created_at).label("last_correction_at"),
         )
         .join(Essay, Essay.user_id == User.id)
         .filter(*filters)
@@ -628,12 +638,134 @@ def corrections_by_user(
                 "user_id": row.id,
                 "email": row.email,
                 "full_name": row.full_name,
+                "corrections": int(row.corrigidas),
                 "corrigidas": int(row.corrigidas),
                 "percent": round(percent, 2),
+                "last_correction_at": _to_local(row.last_correction_at, timezone).isoformat()
+                if row.last_correction_at
+                else None,
             }
         )
 
     return {
         "total_corrections": int(total_corrections),
-        "results": results,
+        "data": results,
     }
+
+
+@router.get("/metrics/reviews")
+def reviews_metrics(
+    start: Optional[str] = Query(default=None),
+    end: Optional[str] = Query(default=None),
+    timezone: str = Query(default="America/Sao_Paulo"),
+    limit: int = Query(default=20, ge=1, le=200),
+    group_by: Optional[str] = Query(default=None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(_require_admin),
+):
+    start_local, end_local, tz = _parse_period(start, end, timezone, default_days=None)
+    filters = []
+    if start_local and end_local:
+        start_utc = _to_utc(start_local)
+        end_utc = _to_utc(end_local)
+        filters.extend(
+            [
+                EssayReview.created_at >= start_utc,
+                EssayReview.created_at < end_utc,
+            ]
+        )
+
+    comment_condition = func.length(func.trim(EssayReview.comment)) > 0
+
+    total_reviews = (
+        db.query(func.count(EssayReview.id))
+        .filter(*filters)
+        .scalar()
+    )
+    avg_stars = (
+        db.query(func.avg(EssayReview.stars))
+        .filter(*filters)
+        .scalar()
+    )
+    comments_count = (
+        db.query(func.count(EssayReview.id))
+        .filter(*filters, comment_condition)
+        .scalar()
+    )
+
+    dist_rows = (
+        db.query(EssayReview.stars, func.count(EssayReview.id))
+        .filter(*filters)
+        .group_by(EssayReview.stars)
+        .all()
+    )
+    distribution = {str(star): 0 for star in range(1, 6)}
+    for stars, count in dist_rows:
+        if stars is not None:
+            distribution[str(int(stars))] = int(count)
+
+    recent_rows = (
+        db.query(
+            EssayReview.id,
+            EssayReview.stars,
+            EssayReview.comment,
+            EssayReview.essay_id,
+            Essay.tema,
+            User.email,
+            EssayReview.created_at,
+        )
+        .join(Essay, Essay.id == EssayReview.essay_id)
+        .join(User, User.id == EssayReview.user_id)
+        .filter(*filters, comment_condition)
+        .order_by(EssayReview.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+
+    recent_comments = []
+    for row in recent_rows:
+        recent_comments.append(
+            {
+                "review_id": row.id,
+                "stars": row.stars,
+                "comment": row.comment,
+                "essay_id": row.essay_id,
+                "tema": row.tema,
+                "user_email": row.email,
+                "created_at": _to_local(row.created_at, timezone).isoformat()
+                if row.created_at
+                else None,
+            }
+        )
+
+    response = {
+        "avg_stars": round(float(avg_stars or 0), 2),
+        "total_reviews": int(total_reviews or 0),
+        "comments_count": int(comments_count or 0),
+        "distribution": distribution,
+        "recent_comments": recent_comments,
+    }
+
+    if group_by:
+        group_by = _ensure_group_by(group_by)
+        if not start_local or not end_local:
+            start_local, end_local, tz = _parse_period(
+                None, None, timezone, default_days=30
+            )
+        start_local, end_local = _clamp_range(start_local, end_local, group_by)
+        start_utc = _to_utc(start_local)
+        end_utc = _to_utc(end_local)
+        results = _query_series_count(
+            db=db,
+            model=EssayReview,
+            date_field=EssayReview.created_at,
+            start_utc=start_utc,
+            end_utc=end_utc,
+            tz_name=timezone,
+            group_by=group_by,
+        )
+        buckets = _iter_buckets(start_local, end_local, group_by)
+        series = _series_from_results(buckets=buckets, results=results)
+        response["series"] = series
+
+    return response

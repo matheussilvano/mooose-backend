@@ -89,6 +89,7 @@ async def root():
                 "/admin/metrics/corrections",
                 "/admin/metrics/sales",
                 "/admin/metrics/corrections/by-user",
+                "/admin/metrics/reviews",
             ],
             "enem_raw": [
                 "POST /api/enem/corrigir-texto",
