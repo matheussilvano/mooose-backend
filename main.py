@@ -11,6 +11,7 @@ from corrige_redacao_enem import router as enem_router, verify_api_key
 from auth_routes import router as auth_router
 from app_routes import router as app_router
 from demo_routes import router as demo_router
+from payments_routes import router as payments_router
 
 # Cria tabelas do banco
 models.Base.metadata.create_all(bind=engine)
@@ -76,6 +77,10 @@ async def root():
                 "/app/enem/historico",
                 "/app/enem/avaliar",
             ],
+            "payments": [
+                "/payments/create",
+                "/webhooks/mercadopago",
+            ],
             "enem_raw": [
                 "POST /api/enem/corrigir-texto",
                 "POST /api/enem/corrigir-arquivo",
@@ -88,6 +93,7 @@ async def root():
 app.include_router(auth_router)
 app.include_router(app_router)
 app.include_router(demo_router)
+app.include_router(payments_router)
 
 # Mantém seu router original de correção ENEM
 app.include_router(

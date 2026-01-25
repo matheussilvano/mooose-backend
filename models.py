@@ -45,6 +45,11 @@ class User(Base):
         back_populates="user",
         cascade="all, delete-orphan",
     )
+    mp_payments = relationship(
+        "MercadoPagoPayment",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
 
 
 class Plan(Base):
@@ -131,6 +136,26 @@ class EssayReview(Base):
 
     user = relationship("User", back_populates="essay_reviews")
     essay = relationship("Essay", back_populates="reviews")
+
+
+class MercadoPagoPayment(Base):
+    __tablename__ = "mercadopago_payments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    payment_id = Column(String, unique=True, index=True, nullable=False)
+    preference_id = Column(String, nullable=True)
+
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    credits = Column(Integer, nullable=False, default=0)
+    status = Column(String, nullable=True)
+    status_detail = Column(String, nullable=True)
+    credited = Column(Boolean, nullable=False, default=False)
+
+    raw_json = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    user = relationship("User", back_populates="mp_payments")
 
 class DemoKeyUsage(Base):
     __tablename__ = "demo_key_usage"

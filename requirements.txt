@@ -10,3 +10,4 @@ PyPDF2
 cloudinary
 python-multipart
 pydantic[email]
+mercadopago
