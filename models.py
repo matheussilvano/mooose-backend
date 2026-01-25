@@ -9,6 +9,7 @@ from sqlalchemy import (
     Boolean,
     ForeignKey,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
@@ -36,6 +37,11 @@ class User(Base):
     # novo: relacionamento com redações
     essays = relationship(
         "Essay",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+    essay_reviews = relationship(
+        "EssayReview",
         back_populates="user",
         cascade="all, delete-orphan",
     )
@@ -100,6 +106,31 @@ class Essay(Base):
     resultado_json = Column(Text, nullable=False)
 
     user = relationship("User", back_populates="essays")
+    reviews = relationship(
+        "EssayReview",
+        back_populates="essay",
+        cascade="all, delete-orphan",
+    )
+
+
+class EssayReview(Base):
+    __tablename__ = "essay_reviews"
+    __table_args__ = (
+        UniqueConstraint("user_id", "essay_id", name="uq_essay_reviews_user_essay"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    essay_id = Column(Integer, ForeignKey("essays.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+
+    stars = Column(Integer, nullable=False)
+    comment = Column(Text, nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    user = relationship("User", back_populates="essay_reviews")
+    essay = relationship("Essay", back_populates="reviews")
 
 class DemoKeyUsage(Base):
     __tablename__ = "demo_key_usage"

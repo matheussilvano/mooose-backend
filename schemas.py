@@ -1,5 +1,5 @@
 from typing import Optional, Literal
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, conint
 
 class UserCreate(BaseModel):
     email: EmailStr
@@ -47,3 +47,9 @@ class ForgotPasswordRequest(BaseModel):
 class ResetPasswordRequest(BaseModel):
     token: str
     new_password: str
+
+
+class EssayReviewCreate(BaseModel):
+    essay_id: int
+    stars: conint(ge=1, le=5)
+    comment: Optional[str] = None

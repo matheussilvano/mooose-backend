@@ -74,6 +74,7 @@ async def root():
                 "/app/enem/corrigir-texto",
                 "/app/enem/corrigir-arquivo",
                 "/app/enem/historico",
+                "/app/enem/avaliar",
             ],
             "enem_raw": [
                 "POST /api/enem/corrigir-texto",

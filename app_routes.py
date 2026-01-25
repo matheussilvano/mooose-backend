@@ -21,7 +21,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from database import get_db
-from models import User, Essay
+from models import User, Essay, EssayReview
 from auth_routes import get_current_user
 from corrige_redacao_enem import (
     PROMPT_ENEM_CORRECTOR,
@@ -29,7 +29,7 @@ from corrige_redacao_enem import (
     extrair_texto_imagem,
     extrair_texto_pdf,
 )
-from schemas import EnemTextRequest
+from schemas import EnemTextRequest, EssayReviewCreate
 
 router = APIRouter(prefix="/app", tags=["app"])
 
@@ -287,6 +287,18 @@ def historico_enem(
         .order_by(Essay.created_at.asc())
         .all()
     )
+    essay_ids = [essay.id for essay in essays]
+    reviews_by_essay = {}
+    if essay_ids:
+        reviews = (
+            db.query(EssayReview)
+            .filter(
+                EssayReview.user_id == current_user.id,
+                EssayReview.essay_id.in_(essay_ids),
+            )
+            .all()
+        )
+        reviews_by_essay = {review.essay_id: review for review in reviews}
     historico = []
     notas = []
     for essay in essays:
@@ -299,6 +311,20 @@ def historico_enem(
 
         # 'arquivo_path' já é a URL completa do Cloudinary
         arquivo_url = essay.arquivo_path
+        review = reviews_by_essay.get(essay.id)
+        review_payload = None
+        if review:
+            review_payload = {
+                "review_id": review.id,
+                "stars": review.stars,
+                "comment": review.comment,
+                "created_at": review.created_at.isoformat()
+                if review.created_at
+                else None,
+                "updated_at": review.updated_at.isoformat()
+                if review.updated_at
+                else None,
+            }
 
         historico.append(
             {
@@ -316,6 +342,7 @@ def historico_enem(
                 "c5_nota": essay.c5_nota,
                 "arquivo_url": arquivo_url,
                 "resultado": resultado,
+                "review": review_payload,
             }
         )
     stats = {}
@@ -327,3 +354,48 @@ def historico_enem(
             "ultima_nota": notas[-1],
         }
     return {"total": len(essays), "stats": stats, "historico": historico}
+
+
+# ============================
+# Avaliação da correção
+# ============================
+
+
+@router.post("/enem/avaliar")
+def avaliar_correcao(
+    payload: EssayReviewCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    essay = db.get(Essay, payload.essay_id)
+    if not essay or essay.user_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Redação não encontrada.")
+
+    review = (
+        db.query(EssayReview)
+        .filter(
+            EssayReview.user_id == current_user.id,
+            EssayReview.essay_id == payload.essay_id,
+        )
+        .first()
+    )
+    if review:
+        review.stars = payload.stars
+        review.comment = payload.comment
+    else:
+        review = EssayReview(
+            user_id=current_user.id,
+            essay_id=payload.essay_id,
+            stars=payload.stars,
+            comment=payload.comment,
+        )
+        db.add(review)
+
+    db.commit()
+    db.refresh(review)
+    return {
+        "review_id": review.id,
+        "essay_id": review.essay_id,
+        "stars": review.stars,
+        "comment": review.comment,
+    }
