@@ -10,6 +10,7 @@ from sqlalchemy import (
     ForeignKey,
     Text,
     UniqueConstraint,
+    JSON,
 )
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
@@ -28,6 +29,13 @@ class User(Base):
     
     # NOVO CAMPO PARA VERIFICAÇÃO DE E-MAIL
     is_verified = Column(Boolean, default=False, nullable=False)
+
+    # referral system
+    referral_code = Column(String(12), unique=True, index=True, nullable=False)
+    referred_by = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    referral_rewarded = Column(Boolean, default=False, nullable=False)
+    signup_ip = Column(String, nullable=True)
+    device_fingerprint = Column(String, nullable=True)
 
     # créditos para correção de redações
     credits = Column(Integer, default=0)
@@ -51,6 +59,21 @@ class User(Base):
         back_populates="user",
         cascade="all, delete-orphan",
     )
+
+
+class Referral(Base):
+    __tablename__ = "referrals"
+    __table_args__ = (
+        UniqueConstraint("referred_id", name="uq_referrals_referred_id"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    referrer_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    referred_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    status = Column(String, nullable=False, default="pending")  # pending | confirmed | rejected
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+    confirmed_at = Column(DateTime(timezone=True), nullable=True)
+    metadata_json = Column("metadata", JSON, nullable=True)
 
 
 class Plan(Base):

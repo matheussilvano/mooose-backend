@@ -11,3 +11,4 @@ cloudinary
 python-multipart
 pydantic[email]
 mercadopago
+pytest

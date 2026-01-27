@@ -2,7 +2,7 @@ import os
 from datetime import datetime, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -12,6 +12,9 @@ from fastapi_mail import FastMail, MessageSchema, ConnectionConfig
 import models
 from database import SessionLocal
 import schemas
+from rate_limiter import enforce_rate_limit
+from referrals_service import apply_referral_on_signup, generate_referral_code
+from utils import get_client_ip
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -171,20 +174,40 @@ async def get_current_user(
 
 # ===== Rotas =====
 @router.post("/register", response_model=schemas.UserRead)
-async def register(user_in: schemas.UserCreate, db: Session = Depends(get_db)): # Rota agora é ASYNC
+async def register(
+    user_in: schemas.UserCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+): # Rota agora é ASYNC
+    client_ip = get_client_ip(request)
+    enforce_rate_limit(f"signup:{client_ip}", limit=5, window_seconds=60)
     existing = get_user_by_email(db, user_in.email)
     if existing:
         raise HTTPException(
             status_code=400, detail="Já existe um usuário com esse e-mail."
         )
+
     user = models.User(
         email=user_in.email,
         full_name=user_in.full_name,
         hashed_password=get_password_hash(user_in.password),
         credits=2,  # créditos iniciais
-        is_verified=False # NOVO: começa como não verificado
+        is_verified=False, # NOVO: começa como não verificado
+        referral_code=generate_referral_code(db),
+        signup_ip=client_ip,
+        device_fingerprint=user_in.device_fingerprint,
     )
     db.add(user)
+    db.flush()
+
+    apply_referral_on_signup(
+        db,
+        user,
+        user_in.ref,
+        signup_ip=client_ip,
+        device_fingerprint=user_in.device_fingerprint,
+    )
+
     db.commit()
     db.refresh(user)
 

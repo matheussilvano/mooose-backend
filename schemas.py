@@ -5,6 +5,8 @@ class UserCreate(BaseModel):
     email: EmailStr
     password: str
     full_name: Optional[str] = None
+    ref: Optional[str] = None
+    device_fingerprint: Optional[str] = None
 
 
 class LoginRequest(BaseModel):
@@ -53,3 +55,22 @@ class EssayReviewCreate(BaseModel):
     essay_id: int
     stars: conint(ge=1, le=5)
     comment: Optional[str] = None
+
+
+class ReferralStats(BaseModel):
+    pending: int
+    confirmed: int
+    total_earned_credits: int
+
+
+class ReferralMeResponse(BaseModel):
+    referral_code: str
+    referral_link: str
+    reward_per_referral: int
+    stats: ReferralStats
+
+
+class ReferralActivateResponse(BaseModel):
+    credited: bool
+    credits_added: int
+    reason: Optional[str] = None

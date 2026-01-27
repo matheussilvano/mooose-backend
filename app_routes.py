@@ -30,6 +30,7 @@ from corrige_redacao_enem import (
     extrair_texto_pdf,
 )
 from schemas import EnemTextRequest, EssayReviewCreate
+from referrals_service import attempt_referral_activation
 
 router = APIRouter(prefix="/app", tags=["app"])
 
@@ -181,6 +182,7 @@ async def app_corrigir_texto_enem(
     db.commit()
     db.refresh(user_db)
     db.refresh(essay)
+    attempt_referral_activation(db, current_user.id, trigger="first_correction_done")
     return {
         "credits": user_db.credits,
         "resultado": resultado_json,
@@ -274,6 +276,7 @@ async def app_corrigir_arquivo_enem(
     db.commit()
     db.refresh(user_db)
     db.refresh(essay)
+    attempt_referral_activation(db, current_user.id, trigger="first_correction_done")
     return {
         "credits": user_db.credits,
         "resultado": resultado_json,

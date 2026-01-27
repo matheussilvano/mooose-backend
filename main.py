@@ -13,6 +13,7 @@ from app_routes import router as app_router
 from demo_routes import router as demo_router
 from payments_routes import router as payments_router
 from admin_routes import router as admin_router
+from referrals_routes import router as referrals_router
 
 # Cria tabelas do banco
 models.Base.metadata.create_all(bind=engine)
@@ -71,6 +72,10 @@ async def root():
                 "/auth/forgot-password",  # NOVO
                 "/auth/reset-password", # NOVO
             ],
+            "referrals": [
+                "/me/referral",
+                "/referrals/activate",
+            ],
             "app": [
                 "/app/checkout/simular",
                 "/app/enem/corrigir-texto",
@@ -105,6 +110,7 @@ app.include_router(app_router)
 app.include_router(demo_router)
 app.include_router(payments_router)
 app.include_router(admin_router)
+app.include_router(referrals_router)
 
 # Mantém seu router original de correção ENEM
 app.include_router(
