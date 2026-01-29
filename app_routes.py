@@ -30,6 +30,7 @@ from corrige_redacao_enem import (
     extrair_texto_pdf,
 )
 from schemas import EnemTextRequest, EssayReviewCreate
+from anon_service import consume_free, free_remaining
 from referrals_service import attempt_referral_activation
 
 router = APIRouter(prefix="/app", tags=["app"])
@@ -199,7 +200,13 @@ async def app_corrigir_texto_enem(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _require_credits(current_user)
+    user_db = db.get(User, current_user.id)
+    if not user_db:
+        raise HTTPException(status_code=404, detail="Usuário não encontrado.")
+    remaining = free_remaining(user_db.free_used or 0)
+    use_free = remaining > 0
+    if not use_free:
+        _require_credits(user_db)
     prompt_completo = (
         f"{PROMPT_ENEM_CORRECTOR}\n\n"
         f'TEMA DA PROPOSTA DE REDAÇÃO (ENEM):\n"{payload.tema}"\n\n'
@@ -213,7 +220,7 @@ async def app_corrigir_texto_enem(
     nota_final = resultado_json.get("nota_final")
     nota_final_int = int(nota_final) if isinstance(nota_final, (int, float)) else None
     essay = Essay(
-        user_id=current_user.id,
+        user_id=user_db.id,
         tema=payload.tema,
         input_type="texto",
         texto=payload.texto,
@@ -225,7 +232,11 @@ async def app_corrigir_texto_enem(
         c5_nota=notas_comp.get(5),
         resultado_json=json.dumps(resultado_json, ensure_ascii=False),
     )
-    user_db = _debitar_credito(db, current_user)
+    if use_free:
+        new_used = consume_free(user=user_db, anon_session=None, effective_used=user_db.free_used or 0)
+        remaining = free_remaining(new_used)
+    else:
+        user_db = _debitar_credito(db, user_db)
     db.add(essay)
     db.commit()
     db.refresh(user_db)
@@ -233,6 +244,7 @@ async def app_corrigir_texto_enem(
     attempt_referral_activation(db, current_user.id, trigger="first_correction_done")
     return {
         "credits": user_db.credits,
+        "free_remaining": remaining,
         "resultado": resultado_json,
         "essay_id": essay.id,
     }
@@ -250,7 +262,13 @@ async def app_corrigir_arquivo_enem(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _require_credits(current_user)
+    user_db = db.get(User, current_user.id)
+    if not user_db:
+        raise HTTPException(status_code=404, detail="Usuário não encontrado.")
+    remaining = free_remaining(user_db.free_used or 0)
+    use_free = remaining > 0
+    if not use_free:
+        _require_credits(user_db)
     content_type = (arquivo.content_type or "").lower()
     raw_bytes = await arquivo.read()
     if not raw_bytes:
@@ -306,7 +324,7 @@ async def app_corrigir_arquivo_enem(
     nota_final = resultado_json.get("nota_final")
     nota_final_int = int(nota_final) if isinstance(nota_final, (int, float)) else None
     essay = Essay(
-        user_id=current_user.id,
+        user_id=user_db.id,
         tema=tema,
         input_type="arquivo",
         texto=texto_extraido,
@@ -319,7 +337,11 @@ async def app_corrigir_arquivo_enem(
         c5_nota=notas_comp.get(5),
         resultado_json=json.dumps(resultado_json, ensure_ascii=False),
     )
-    user_db = _debitar_credito(db, current_user)
+    if use_free:
+        new_used = consume_free(user=user_db, anon_session=None, effective_used=user_db.free_used or 0)
+        remaining = free_remaining(new_used)
+    else:
+        user_db = _debitar_credito(db, user_db)
     db.add(essay)
     db.commit()
     db.refresh(user_db)
@@ -327,6 +349,7 @@ async def app_corrigir_arquivo_enem(
     attempt_referral_activation(db, current_user.id, trigger="first_correction_done")
     return {
         "credits": user_db.credits,
+        "free_remaining": remaining,
         "resultado": resultado_json,
         "essay_id": essay.id,
     }

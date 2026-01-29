@@ -7,6 +7,7 @@ class UserCreate(BaseModel):
     full_name: Optional[str] = None
     ref: Optional[str] = None
     device_fingerprint: Optional[str] = None
+    anon_id: Optional[str] = None
 
 
 class LoginRequest(BaseModel):
@@ -55,6 +56,32 @@ class EssayReviewCreate(BaseModel):
     essay_id: int
     stars: conint(ge=1, le=5)
     comment: Optional[str] = None
+
+
+class CorrectionTextRequest(BaseModel):
+    tema: str
+    texto: str
+    device_id: Optional[str] = None
+
+
+class CorrectionResponse(BaseModel):
+    free_remaining: int
+    requires_auth: bool
+    requires_payment: bool
+    next_action: Literal["CONTINUE", "PROMPT_SIGNUP", "PROMPT_PAYWALL"]
+    resultado: Optional[dict] = None
+    essay_id: Optional[int] = None
+    credits: Optional[int] = None
+
+
+class LinkAnonRequest(BaseModel):
+    anon_id: str
+
+
+class LinkAnonResponse(BaseModel):
+    linked: bool
+    free_used: int
+    migrated_essays: int
 
 
 class ReferralStats(BaseModel):

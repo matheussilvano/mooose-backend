@@ -14,6 +14,7 @@ from demo_routes import router as demo_router
 from payments_routes import router as payments_router
 from admin_routes import router as admin_router
 from referrals_routes import router as referrals_router
+from corrections_routes import router as corrections_router
 
 # Cria tabelas do banco
 models.Base.metadata.create_all(bind=engine)
@@ -66,9 +67,14 @@ async def root():
         "modules": {
             "auth": [
                 "/auth/register",
+                "/auth/signup",
                 "/auth/login",
                 "/auth/me",
                 "/auth/verify-email",
+                "/auth/email/confirm",
+                "/auth/link-anon",
+                "/auth/google/start",
+                "/auth/google/callback",
                 "/auth/forgot-password",  # NOVO
                 "/auth/reset-password", # NOVO
             ],
@@ -82,6 +88,10 @@ async def root():
                 "/app/enem/corrigir-arquivo",
                 "/app/enem/historico",
                 "/app/enem/avaliar",
+            ],
+            "corrections": [
+                "/corrections",
+                "/corrections/file",
             ],
             "payments": [
                 "/payments/create",
@@ -114,6 +124,7 @@ app.include_router(demo_router)
 app.include_router(payments_router)
 app.include_router(admin_router)
 app.include_router(referrals_router)
+app.include_router(corrections_router)
 
 # Mantém seu router original de correção ENEM
 app.include_router(

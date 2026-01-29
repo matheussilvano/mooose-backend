@@ -1,8 +1,13 @@
+import json
 import os
+import secrets
 from datetime import datetime, timedelta
 from typing import Optional
+from urllib.parse import urlencode
+from urllib.request import Request as UrlRequest, urlopen
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import RedirectResponse
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -12,6 +17,11 @@ from fastapi_mail import FastMail, MessageSchema, ConnectionConfig
 import models
 from database import SessionLocal
 import schemas
+from anon_service import (
+    free_remaining,
+    get_or_create_anon_session,
+    merge_anon_to_user,
+)
 from rate_limiter import enforce_rate_limit
 from referrals_service import apply_referral_on_signup, generate_referral_code
 from utils import get_client_ip
@@ -25,6 +35,11 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 7 dias
 
 pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
+oauth2_scheme_optional = OAuth2PasswordBearer(tokenUrl="/auth/login", auto_error=False)
+
+GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID")
+GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET")
+GOOGLE_REDIRECT_URI = os.environ.get("GOOGLE_REDIRECT_URI")
 
 # Configuração de E-mail (lê do ambiente)
 conf = ConnectionConfig(
@@ -89,10 +104,11 @@ def create_password_reset_token(email: str) -> str:
 
 # Helper para enviar o e-mail
 async def send_verification_email(email: str, token: str):
-    frontend_url = os.environ.get("FRONTEND_URL", "http://127.0.0.1:5500") # Use a URL do seu front na Vercel
-    
-    # Aponte para a nova página HTML que você criará
-    verification_link = f"{frontend_url}/verify-email.html?token={token}"
+    backend_url = os.environ.get(
+        "BACKEND_URL",
+        "https://mooose-backend.onrender.com",
+    )
+    verification_link = f"{backend_url}/auth/email/confirm?token={token}"
 
     html = f"""
     <p>Olá!</p>
@@ -147,10 +163,83 @@ async def send_password_reset_email(email: str, token: str):
         pass # Não informe ao usuário se o e-mail falhou, por segurança
 
 
+def _safe_redirect_path(path: Optional[str]) -> str:
+    if path in {"/app/editor", "/app/paywall"}:
+        return path
+    return "/app/editor"
+
+
+def _post_login_path(user: models.User) -> str:
+    remaining = free_remaining(user.free_used or 0)
+    has_credits = (user.credits or 0) > 0
+    if remaining > 0 or has_credits:
+        return "/app/editor"
+    return "/app/paywall"
+
+
+def _build_frontend_redirect(path: str, token: str) -> str:
+    frontend_url = os.environ.get("FRONTEND_URL", "https://mooose.com.br").rstrip("/")
+    return f"{frontend_url}{path}?token={token}"
+
+
+def _google_exchange_code(code: str) -> dict:
+    if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET or not GOOGLE_REDIRECT_URI:
+        raise HTTPException(status_code=500, detail="Google OAuth não configurado.")
+    payload = urlencode(
+        {
+            "code": code,
+            "client_id": GOOGLE_CLIENT_ID,
+            "client_secret": GOOGLE_CLIENT_SECRET,
+            "redirect_uri": GOOGLE_REDIRECT_URI,
+            "grant_type": "authorization_code",
+        }
+    ).encode("utf-8")
+    req = UrlRequest(
+        "https://oauth2.googleapis.com/token",
+        data=payload,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    with urlopen(req, timeout=10) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def _google_token_info(id_token: str) -> dict:
+    url = f"https://oauth2.googleapis.com/tokeninfo?id_token={id_token}"
+    with urlopen(url, timeout=10) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
 async def get_current_user(
     token: str = Depends(oauth2_scheme),
     db: Session = Depends(get_db),
 ) -> models.User:
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Não foi possível autenticar. Faça login novamente.",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        user_id: int = payload.get("sub_id")
+        email: str = payload.get("sub_email")
+        if user_id is None or email is None:
+            raise credentials_exception
+        token_data = schemas.TokenData(user_id=user_id, email=email)
+    except JWTError:
+        raise credentials_exception
+
+    user = db.query(models.User).filter(models.User.id == token_data.user_id).first()
+    if user is None:
+        raise credentials_exception
+    return user
+
+
+async def get_current_user_optional(
+    token: Optional[str] = Depends(oauth2_scheme_optional),
+    db: Session = Depends(get_db),
+) -> Optional[models.User]:
+    if not token:
+        return None
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Não foi possível autenticar. Faça login novamente.",
@@ -211,6 +300,17 @@ async def register(
     db.commit()
     db.refresh(user)
 
+    if user_in.anon_id:
+        anon_session = get_or_create_anon_session(
+            db,
+            anon_id=user_in.anon_id,
+            ip=client_ip,
+            device_id=user_in.device_fingerprint,
+        )
+        merge_anon_to_user(db, user, anon_session)
+        db.commit()
+        db.refresh(user)
+
     # Envia e-mail de verificação
     try:
         token = create_verification_token(user.email)
@@ -220,6 +320,15 @@ async def register(
         print(f"ALERTA: Falha ao enviar e-mail de verificação para {user.email}: {e}")
 
     return user
+
+
+@router.post("/signup", response_model=schemas.UserRead)
+async def signup(
+    user_in: schemas.UserCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    return await register(user_in=user_in, request=request, db=db)
 
 
 @router.post("/login", response_model=schemas.Token)
@@ -245,9 +354,179 @@ def login(login_in: schemas.LoginRequest, db: Session = Depends(get_db)):
     return schemas.Token(access_token=token)
 
 
+@router.get("/google/start")
+def google_start(
+    anon_id: Optional[str] = None,
+    redirect: Optional[str] = None,
+):
+    if not GOOGLE_CLIENT_ID or not GOOGLE_REDIRECT_URI:
+        raise HTTPException(status_code=500, detail="Google OAuth não configurado.")
+    redirect_path = _safe_redirect_path(redirect) if redirect else None
+    state_payload = {
+        "anon_id": anon_id,
+        "redirect": redirect_path,
+        "exp": datetime.utcnow() + timedelta(minutes=15),
+    }
+    state = jwt.encode(state_payload, SECRET_KEY, algorithm=ALGORITHM)
+    params = {
+        "client_id": GOOGLE_CLIENT_ID,
+        "redirect_uri": GOOGLE_REDIRECT_URI,
+        "response_type": "code",
+        "scope": "openid email profile",
+        "state": state,
+        "prompt": "select_account",
+    }
+    url = f"https://accounts.google.com/o/oauth2/v2/auth?{urlencode(params)}"
+    return RedirectResponse(url=url)
+
+
+@router.get("/google/callback")
+def google_callback(
+    code: str,
+    request: Request,
+    state: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    anon_id = None
+    redirect_path = None
+    if state:
+        try:
+            payload = jwt.decode(state, SECRET_KEY, algorithms=[ALGORITHM])
+            anon_id = payload.get("anon_id")
+            redirect_path = payload.get("redirect")
+        except JWTError:
+            pass
+
+    token_data = _google_exchange_code(code)
+    id_token = token_data.get("id_token")
+    if not id_token:
+        raise HTTPException(status_code=400, detail="Token Google inválido.")
+
+    info = _google_token_info(id_token)
+    email = info.get("email")
+    google_id = info.get("sub")
+    email_verified = info.get("email_verified") in {"true", True}
+    if not email or not google_id:
+        raise HTTPException(status_code=400, detail="Dados Google inválidos.")
+
+    user = db.query(models.User).filter(models.User.google_id == google_id).first()
+    if not user:
+        user = db.query(models.User).filter(models.User.email == email).first()
+        if user:
+            user.google_id = google_id
+        else:
+            client_ip = get_client_ip(request) if request else None
+            user = models.User(
+                email=email,
+                full_name=None,
+                hashed_password=get_password_hash(secrets.token_urlsafe(32)),
+                credits=2,
+                is_verified=True,
+                referral_code=generate_referral_code(db),
+                signup_ip=client_ip,
+                google_id=google_id,
+            )
+            db.add(user)
+            db.flush()
+
+    if email_verified and not user.is_verified:
+        user.is_verified = True
+
+    if not user.referral_code:
+        user.referral_code = generate_referral_code(db)
+
+    if anon_id:
+        anon_session = get_or_create_anon_session(
+            db,
+            anon_id=anon_id,
+            ip=get_client_ip(request) if request else None,
+            device_id=None,
+        )
+        merge_anon_to_user(db, user, anon_session)
+
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+
+    access_token = create_access_token(
+        data={"sub_id": user.id, "sub_email": user.email},
+    )
+    final_redirect = _safe_redirect_path(redirect_path) if redirect_path else _post_login_path(user)
+    redirect_url = _build_frontend_redirect(final_redirect, access_token)
+    return RedirectResponse(url=redirect_url)
+
+
 @router.get("/me", response_model=schemas.UserRead)
 def read_me(current_user: models.User = Depends(get_current_user)):
     return current_user
+
+
+@router.get("/email/confirm")
+def confirm_email(
+    token: str,
+    anon_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="Token de verificação inválido ou expirado.",
+    )
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        email: str = payload.get("sub_email")
+        if email is None:
+            raise credentials_exception
+    except JWTError:
+        raise credentials_exception
+
+    user = get_user_by_email(db, email)
+    if user is None:
+        raise HTTPException(status_code=404, detail="Usuário não encontrado.")
+
+    if not user.is_verified:
+        user.is_verified = True
+
+    if anon_id:
+        anon_session = get_or_create_anon_session(
+            db,
+            anon_id=anon_id,
+            ip=None,
+            device_id=None,
+        )
+        merge_anon_to_user(db, user, anon_session)
+
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+
+    access_token = create_access_token(
+        data={"sub_id": user.id, "sub_email": user.email},
+    )
+    redirect_path = _post_login_path(user)
+    redirect_url = _build_frontend_redirect(redirect_path, access_token)
+    return RedirectResponse(url=redirect_url)
+
+
+@router.post("/link-anon", response_model=schemas.LinkAnonResponse)
+def link_anonymous_session(
+    payload: schemas.LinkAnonRequest,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    anon_session = (
+        db.query(models.AnonymousSession)
+        .filter(models.AnonymousSession.anon_id == payload.anon_id)
+        .first()
+    )
+    if not anon_session:
+        return {"linked": False, "free_used": current_user.free_used or 0, "migrated_essays": 0}
+
+    new_used, migrated = merge_anon_to_user(db, current_user, anon_session)
+    db.add(current_user)
+    db.add(anon_session)
+    db.commit()
+    db.refresh(current_user)
+    return {"linked": True, "free_used": new_used, "migrated_essays": migrated or 0}
 
 # NOVA ROTA: Para verificar o e-mail
 @router.post("/verify-email")

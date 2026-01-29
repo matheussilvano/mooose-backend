@@ -21,3 +21,14 @@ def enforce_rate_limit(key: str, limit: int = 5, window_seconds: int = 60) -> No
                 detail="Muitas requisições. Tente novamente em instantes.",
             )
         bucket.append(now)
+
+
+def is_rate_limited(key: str, limit: int = 5, window_seconds: int = 60) -> bool:
+    now = time.time()
+    with _LOCK:
+        bucket = _RATE_LIMIT_BUCKETS.setdefault(key, deque())
+        cutoff = now - window_seconds
+        while bucket and bucket[0] <= cutoff:
+            bucket.popleft()
+        bucket.append(now)
+        return len(bucket) > limit

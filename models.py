@@ -25,10 +25,12 @@ class User(Base):
     email = Column(String, unique=True, index=True, nullable=False)
     full_name = Column(String, nullable=True)
     hashed_password = Column(String, nullable=False)
+    google_id = Column(String, unique=True, index=True, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
     
     # NOVO CAMPO PARA VERIFICAÇÃO DE E-MAIL
     is_verified = Column(Boolean, default=False, nullable=False)
+    free_used = Column(Integer, default=0, nullable=False)
 
     # referral system
     referral_code = Column(String(12), unique=True, index=True, nullable=False)
@@ -76,6 +78,20 @@ class Referral(Base):
     metadata_json = Column("metadata", JSON, nullable=True)
 
 
+class AnonymousSession(Base):
+    __tablename__ = "anonymous_sessions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    anon_id = Column(String, unique=True, index=True, nullable=False)
+    free_used = Column(Integer, default=0, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    last_ip = Column(String, nullable=True)
+    device_id = Column(String, nullable=True)
+    linked_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    linked_at = Column(DateTime(timezone=True), nullable=True)
+
+
 class Plan(Base):
     __tablename__ = "plans"
 
@@ -112,7 +128,8 @@ class Essay(Base):
     __tablename__ = "essays"
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    anon_id = Column(String, nullable=True, index=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
 
