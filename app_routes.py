@@ -50,23 +50,22 @@ except Exception as e:
 
 
 class SimulateCheckout(BaseModel):
-    plano: str  # "solo" | "intensivo" | "unlimited"
+    plano: str  # "individual" | "padrao" | "intensivao"
 
 
 PLANOS_LANCAMENTO = {
-    "solo": {"name": "Plano Enem Solo", "credits": 4, "price": 9.90},
-    "intensivo": {"name": "Plano Intensivo", "credits": 10, "price": 19.90},
-    "unlimited": {"name": "Plano Unlimited", "credits": 9999, "price": 29.90},
+    "individual": {"name": "Plano Individual", "credits": 1, "price": 1.90},
+    "padrao": {"name": "Plano Padrão", "credits": 4, "price": 9.90},
+    "intensivao": {"name": "Plano Intensivão", "credits": 25, "price": 19.90},
 }
 
 
-@router.post("/checkout/simular")
-def simular_checkout(
-    payload: SimulateCheckout,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+def _apply_plan_credit(
+    *,
+    plano_id: str,
+    db: Session,
+    current_user: User,
 ):
-    plano_id = payload.plano
     if plano_id not in PLANOS_LANCAMENTO:
         raise HTTPException(status_code=400, detail="Plano inválido.")
     plano = PLANOS_LANCAMENTO[plano_id]
@@ -90,6 +89,55 @@ def simular_checkout(
         "launch_price": plano["price"],
         "launch_promo": True,
     }
+
+
+@router.post("/checkout/simular")
+def simular_checkout(
+    payload: SimulateCheckout,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return _apply_plan_credit(
+        plano_id=payload.plano,
+        db=db,
+        current_user=current_user,
+    )
+
+
+@router.post("/checkout/simular/individual")
+def simular_checkout_individual(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return _apply_plan_credit(
+        plano_id="individual",
+        db=db,
+        current_user=current_user,
+    )
+
+
+@router.post("/checkout/simular/padrao")
+def simular_checkout_padrao(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return _apply_plan_credit(
+        plano_id="padrao",
+        db=db,
+        current_user=current_user,
+    )
+
+
+@router.post("/checkout/simular/intensivao")
+def simular_checkout_intensivao(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return _apply_plan_credit(
+        plano_id="intensivao",
+        db=db,
+        current_user=current_user,
+    )
 
 
 # ============================

@@ -39,7 +39,7 @@ class EnemTextRequest(BaseModel):
     texto: str
 
 class CheckoutSimulateRequest(BaseModel):
-    plano: Literal["solo", "intensivo", "unlimited"]
+    plano: Literal["individual", "padrao", "intensivao"]
 
 # --- NOVAS CLASSES ADICIONADAS ABAIXO ---
 

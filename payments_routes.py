@@ -31,10 +31,24 @@ MP_BACK_URL_FAILURE = os.environ.get("MP_BACK_URL_FAILURE")
 MP_BACK_URL_PENDING = os.environ.get("MP_BACK_URL_PENDING")
 
 # === Produto ===
-PACKAGE_TITLE = "10 créditos Mooose"
-PACKAGE_CREDITS = 10
-PACKAGE_PRICE = 9.90
 PACKAGE_CURRENCY = "BRL"
+PACKAGES = {
+    "individual": {
+        "title": "Plano Individual - 1 correção",
+        "credits": 1,
+        "price": 1.90,
+    },
+    "padrao": {
+        "title": "Plano Padrão - 4 correções",
+        "credits": 4,
+        "price": 9.90,
+    },
+    "intensivao": {
+        "title": "Plano Intensivão - 25 correções",
+        "credits": 25,
+        "price": 19.90,
+    },
+}
 
 
 def _is_production() -> bool:
@@ -111,26 +125,32 @@ def _validate_webhook_signature(
         raise HTTPException(status_code=401, detail="Assinatura inválida.")
 
 
-@router.post("/payments/create")
-def create_payment_preference(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+def _create_payment_preference(
+    *,
+    plan_id: str,
+    db: Session,
+    current_user: User,
 ):
+    plan = PACKAGES.get(plan_id)
+    if not plan:
+        raise HTTPException(status_code=400, detail="Plano inválido.")
+
     sdk = _get_sdk()
 
     preference_data = {
         "items": [
             {
-                "title": PACKAGE_TITLE,
+                "title": plan["title"],
                 "quantity": 1,
-                "unit_price": PACKAGE_PRICE,
+                "unit_price": plan["price"],
                 "currency_id": PACKAGE_CURRENCY,
             }
         ],
         "external_reference": str(current_user.id),
         "metadata": {
             "user_id": current_user.id,
-            "credits": PACKAGE_CREDITS,
+            "credits": plan["credits"],
+            "plan_id": plan_id,
         },
     }
 
@@ -173,7 +193,62 @@ def create_payment_preference(
             detail="Resposta invalida do Mercado Pago.",
         )
 
-    return {"checkout_url": checkout_url, "preference_id": preference_id}
+    return {
+        "checkout_url": checkout_url,
+        "preference_id": preference_id,
+        "plan_id": plan_id,
+        "credits": plan["credits"],
+        "price": plan["price"],
+    }
+
+
+@router.post("/payments/create")
+def create_payment_preference(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    # compatibilidade: plano padrão por padrão
+    return _create_payment_preference(
+        plan_id="padrao",
+        db=db,
+        current_user=current_user,
+    )
+
+
+@router.post("/payments/create/individual")
+def create_payment_preference_individual(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return _create_payment_preference(
+        plan_id="individual",
+        db=db,
+        current_user=current_user,
+    )
+
+
+@router.post("/payments/create/padrao")
+def create_payment_preference_padrao(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return _create_payment_preference(
+        plan_id="padrao",
+        db=db,
+        current_user=current_user,
+    )
+
+
+@router.post("/payments/create/intensivao")
+def create_payment_preference_intensivao(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return _create_payment_preference(
+        plan_id="intensivao",
+        db=db,
+        current_user=current_user,
+    )
 
 
 @router.post("/webhooks/mercadopago")

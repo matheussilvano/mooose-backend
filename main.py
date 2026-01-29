@@ -85,6 +85,9 @@ async def root():
             ],
             "payments": [
                 "/payments/create",
+                "/payments/create/individual",
+                "/payments/create/padrao",
+                "/payments/create/intensivao",
                 "/webhooks/mercadopago",
             ],
             "admin": [
