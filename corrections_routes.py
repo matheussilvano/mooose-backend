@@ -16,7 +16,7 @@ from fastapi import (
     Request,
     UploadFile,
 )
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, object_session
 
 from anon_service import (
     ANON_IP_SOFT_LIMIT,
@@ -102,6 +102,8 @@ def _maybe_require_auth_for_anon(
 
 
 def _debit_credit(db: Session, user: User) -> None:
+    if object_session(user) is not db:
+        user = db.merge(user)
     if user.credits is None:
         user.credits = 0
     if user.credits <= 0:
@@ -111,6 +113,14 @@ def _debit_credit(db: Session, user: User) -> None:
         )
     user.credits -= 1
     db.add(user)
+
+
+def _ensure_user_attached(db: Session, user: Optional[User]) -> Optional[User]:
+    if user is None:
+        return None
+    if object_session(user) is db:
+        return user
+    return db.merge(user)
 
 
 async def _build_text_correction(
@@ -210,6 +220,7 @@ async def correction_text(
 
     effective_used = effective_free_used(current_user, anon_session)
     remaining = free_remaining(effective_used)
+    current_user = _ensure_user_attached(db, current_user)
 
     if current_user is None:
         if remaining <= 0:
@@ -318,6 +329,7 @@ async def correction_file(
 
     effective_used = effective_free_used(current_user, anon_session)
     remaining = free_remaining(effective_used)
+    current_user = _ensure_user_attached(db, current_user)
 
     if current_user is None:
         if remaining <= 0:
