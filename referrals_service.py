@@ -97,7 +97,8 @@ def attempt_referral_activation(
     trigger: str,
     request_ip: Optional[str] = None,
 ) -> Dict[str, Any]:
-    with db.begin():
+    tx = db.begin_nested() if db.in_transaction() else db.begin()
+    with tx:
         referred_q = _maybe_for_update(
             db.query(User).filter(User.id == referred_user_id), db
         )
