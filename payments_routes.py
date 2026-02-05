@@ -34,17 +34,17 @@ MP_BACK_URL_PENDING = os.environ.get("MP_BACK_URL_PENDING")
 PACKAGE_CURRENCY = "BRL"
 PACKAGES = {
     "individual": {
-        "title": "Plano Individual - 1 correção",
+        "title": "Pacote Individual - 1 redação",
         "credits": 1,
         "price": 1.90,
     },
     "padrao": {
-        "title": "Plano Padrão - 4 correções",
-        "credits": 4,
+        "title": "Pacote 10 redações",
+        "credits": 10,
         "price": 9.90,
     },
     "intensivao": {
-        "title": "Plano Intensivão - 25 correções",
+        "title": "Pacote Intensivão - 25 redações",
         "credits": 25,
         "price": 19.90,
     },
@@ -100,13 +100,13 @@ def _validate_webhook_signature(
     x_signature: Optional[str],
     x_request_id: Optional[str],
 ) -> None:
+    if not MP_WEBHOOK_SECRET:
+        logger.warning(
+            "MP_WEBHOOK_SECRET não configurado. Ignorando validação de assinatura."
+        )
+        return
     if not x_signature or not x_request_id:
         raise HTTPException(status_code=401, detail="Assinatura ausente.")
-    if not MP_WEBHOOK_SECRET:
-        raise HTTPException(
-            status_code=500,
-            detail="MP_WEBHOOK_SECRET não configurado no ambiente.",
-        )
 
     parts = _parse_signature(x_signature)
     ts = parts.get("ts")
@@ -315,12 +315,18 @@ async def mercadopago_webhook(
         except ValueError:
             user_id = None
 
-    credits_to_add = PACKAGE_CREDITS
-    if metadata.get("credits"):
+    credits_to_add = None
+    if metadata.get("credits") is not None:
         try:
             credits_to_add = int(metadata.get("credits"))
         except (TypeError, ValueError):
-            credits_to_add = PACKAGE_CREDITS
+            credits_to_add = None
+    if credits_to_add is None:
+        plan_id = metadata.get("plan_id")
+        if plan_id and plan_id in PACKAGES:
+            credits_to_add = int(PACKAGES[plan_id]["credits"])
+        else:
+            credits_to_add = 0
 
     payment_record = (
         db.query(MercadoPagoPayment)

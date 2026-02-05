@@ -55,9 +55,9 @@ class SimulateCheckout(BaseModel):
 
 
 PLANOS_LANCAMENTO = {
-    "individual": {"name": "Plano Individual", "credits": 1, "price": 1.90},
-    "padrao": {"name": "Plano Padrão", "credits": 4, "price": 9.90},
-    "intensivao": {"name": "Plano Intensivão", "credits": 25, "price": 19.90},
+    "individual": {"name": "Pacote Individual", "credits": 1, "price": 1.90},
+    "padrao": {"name": "Pacote 10 redações", "credits": 10, "price": 9.90},
+    "intensivao": {"name": "Pacote Intensivão", "credits": 25, "price": 19.90},
 }
 
 
@@ -80,7 +80,7 @@ def _apply_plan_credit(
     db.commit()
     db.refresh(user_db)
     message = (
-        f"SUPER promoção de lançamento 🎉 {plano['name']} por R$ {plano['price']:.2f}/mês "
+        f"SUPER promoção de lançamento 🎉 {plano['name']} por R$ {plano['price']:.2f} "
         f"para os primeiros alunos. Você recebeu +{plano['credits']} créditos."
     )
     return {
